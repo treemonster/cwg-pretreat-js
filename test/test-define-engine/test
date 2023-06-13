@@ -1,0 +1,12 @@
+#ifndef ZZ
+#def ZZ
+ZZ is defined
+#undef ZZ
+#else
+zza
+#endif
+#ifdef ZZ
+hello world
+#endif
+
+KK

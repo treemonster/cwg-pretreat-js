@@ -1,0 +1,2 @@
+#def TYP_win32
+#define T(x) 'T_'+require('crypto').createHash('md5').update(x).digest('hex')

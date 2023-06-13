@@ -1,0 +1,22 @@
+#ifdef XX
+  XX is defined
+  Working makes me @HAPPY
+  @UPPER(apple)
+#else
+  XX is not defined
+  #define LOVE loved
+  #define MD5(x) require('crypto').createHash('md5').update(x).digest('hex')
+  #ifdef YY
+    YY is defined
+    #def YYX
+    #include ./file1
+    -- included file ./file1 --
+    #undef YYX
+  #else
+    YY is not defined
+    #def YYY
+    #include ./file1
+    #undef YYY
+  #endif
+#endif
+the end

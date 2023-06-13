@@ -1,0 +1,2 @@
+<?js
+echo(JSON.stringify({name, age}))

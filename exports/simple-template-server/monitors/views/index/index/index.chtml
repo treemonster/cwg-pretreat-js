@@ -1,0 +1,7 @@
+<h1><?js echo(title) ?></h1>
+<h3>choose a function to use</h3>
+<ol>
+<?js links.map(({name, link})=>{ ?>
+  <li><a href='<?js echo(link) ?>'><?js echo(name) ?></a></li>
+<?js }) ?>
+</ol>

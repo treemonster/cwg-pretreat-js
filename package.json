@@ -1,0 +1,20 @@
+{
+  "name": "cwg-pretreat-js",
+  "version": "3.2.3",
+  "engines": {
+    "node": ">=12"
+  },
+  "bin": {
+    "cjs": "./cli.js"
+  },
+  "scripts": {
+    "test:define": "node test/test-define-engine.js",
+    "test:template": "node test/test-template-engine.js",
+    "test:exports:define": "node test/test-exports-macro-define-processor.js",
+    "test:exports:server": "node test/test-exports-simple-template-server.js",
+    "test:cli": "bash test/test-cli.sh"
+  },
+  "dependencies": {
+    "commander": "^10.0.1"
+  }
+}

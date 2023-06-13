@@ -1,0 +1,22 @@
+<?js header('content-type', 'text/html; charset=utf8') ?><!DOCTYPE html>
+<html lang="en" data-dpr="2">
+<head>
+  <meta charset="UTF-8" />
+  <link rel="shortcut icon" href="#" type="image/x-icon">
+  <meta
+    content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no"
+    name="viewport"
+  />
+  <meta name="flexible" content="initial-dpr=2" />
+</head>
+<body>
+  <style>
+  li{
+  line-height: 2;
+  }
+  </style>
+
+<?js echo(content) ?>
+
+</body>
+</html>

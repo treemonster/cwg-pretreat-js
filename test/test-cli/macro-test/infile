@@ -1,0 +1,12 @@
+
+## This is a simple usage example of macro engine ##
+
+#ifdef XX
+  XX is defined
+  #ifdef XX1
+    XX1 is defined
+  #endif
+  #ifndef XX2
+    XX2 if not defined
+  #endif
+#endif
