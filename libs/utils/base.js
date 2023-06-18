@@ -1,4 +1,5 @@
 const fs=require('fs')
+const path=require('path')
 
 function getTextFile(fn) {
   const p=fs.statSync(fn)
@@ -7,6 +8,7 @@ function getTextFile(fn) {
     readContentSync: _=>fs.readFileSync(fn).toString('utf8'),
   }
 }
+
 
 function existsFile(fn) {
   try{
@@ -19,13 +21,13 @@ function md5(str) {
   return require('crypto').createHash('md5').update(str).digest('hex')
 }
 
-const path=require('path')
 const PACKAGE_DIR=path.resolve(__dirname+'/../..')+path.sep
 function isPackageFile(_access_file) {
   return _access_file.indexOf(PACKAGE_DIR)===0
 }
 
 function loadOrSetCache(caches, {filename, mockFileContent, wrapper}, buildOpcodeFunc) {
+  if(!buildOpcodeFunc) buildOpcodeFunc=x=>x
   const wrapperKey=wrapper? (wrapper._key=wrapper._key || wrapper.toString()): '\n'
   const [lastModifiedKey, cache_filename, readContentSync]=(_=>{
     if(mockFileContent) {
@@ -65,10 +67,10 @@ function getTimeRecorder() {
   function cost() {
     return Date.now()-_t
   }
-  function add_checkpoint(name) {
+  function add_checkpoint(state) {
     const v=records.length? records[records.length-1].cost: 0
     const _cost=cost()
-    records.push({name, cost: _cost, step_cost: _cost-v})
+    records.push({state, cost: _cost, step_cost: _cost-v})
   }
   function summary() {
     return records
@@ -187,7 +189,7 @@ function getTimelineRecorder(maxlen, stepcount) {
   function listAfter(t) {
     for(let i=0; i<seq.length; i++) {
       if(seq[i].time<=t) continue
-      return seq.slice(i, stepcount)
+      return seq.slice(i, stepcount+i)
     }
     return []
   }
@@ -197,67 +199,11 @@ function getTimelineRecorder(maxlen, stepcount) {
   }
 }
 
-
-/*
- This function is not a complete implementation of an ini file parser.
- Some nested expressions may be parsed incorrectly.
- */
-function simpleINIParser(v, fn, _ini={}, _handler=null) {
-  const pfn=path.parse(fn)
-  const ini=_ini, o={}
-  const lines=v.split('\n')
-  for(let i=0; i<lines.length; i++) {
-    const li=lines[i].trim()
-    li.replace(/^(?:;.*|\[([^\]]+)\]|([^=\s]+)\s*=\s*(.*?))\s*(?:;(.*))?$/, (_, ns, key, value, comment)=>{
-      if(ns) {
-        o.ns=ns
-        ini[o.ns]=ini[o.ns] || {}
-        o.rules=ini[o.ns]
-      }else if(key) {
-        let p=value.split(/\s+/).filter(a=>a).reduce((s, x)=>{
-          return s+(x.match(/^(['"])(.+?)\1$|$/)[2] || (_=>{
-            return ({
-              __dirname: pfn.dir,
-              __filename: fn,
-            })[x] || ini[o.ns][x] || x
-          })())
-        }, '')
-        const val=parseINIValue(p)
-        const keys=key.split('.').filter(a=>a)
-        keys.reduce((o, x, i)=>{
-          if(_handler!==null) {
-            _handler(ini, x, keys, {
-              rawValue: value,
-              value: val,
-              comment,
-            })
-          }
-          if(i===keys.length-1) {
-            o[x]=val
-            if(comment) {
-              o['.comment:'+x]=comment.trim()
-            }
-          }else{
-            o[x]=o[x] || {}
-            return o[x]
-          }
-        }, o.rules)
-      }
-    })
-  }
-  return ini
-}
-
-function parseINIValue(p) {
-  if(+p+''===p) return +p
-  if(['on', 'yes', 'true'].includes((p+'').toLowerCase())) {
-    return true
-  }
-  if(['off', 'no', 'false'].includes((p+'').toLowerCase())) {
-    return false
-  }
-  return p
-}
+const {
+  INIParser,
+  parseINIValue,
+  filename2INIContext,
+}=require('./iniParser')
 
 module.exports={
   readrs,
@@ -272,6 +218,7 @@ module.exports={
   loadBalance,
   isPackageFile,
   getTimelineRecorder,
-  simpleINIParser,
+  INIParser,
   parseINIValue,
+  filename2INIContext,
 }

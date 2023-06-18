@@ -49,16 +49,19 @@ function cjs_server() {
     .command('server')
     .description('Start a local server')
     .option('-c --config <string>', 'Specifiy the configuration file')
-  const {simpleINIParser, parseINIValue}=require(__dirname+'/libs/utils/base')
+  const {INIParser, parseINIValue, filename2INIContext}=require(__dirname+'/libs/utils/base')
   const fs=require('fs')
   const default_ini=__dirname+'/cjs-server.ini'
-  const ini=simpleINIParser(fs.readFileSync(default_ini, 'utf8'), default_ini, {}, (ini, x, keys, params)=>{
-    if(x!==keys[keys.length-1]) return;
-    p.option('--'+keys.join('-')+' <string>', params.comment, params.rawValue)
+  const {comments, groups, ini, ctx}=INIParser({
+    filename: default_ini,
+    activeAllSections: ['cjs'],
+    onValue: ({keychain, comment, rawValue})=>{
+      p.option('--'+keychain.join('-')+' <string>', comment, rawValue)
+    },
   })
   p.action(x=>{
     for(let v in x) {
-      x[v]=parseINIValue(x[v])
+      x[v]=parseINIValue(x[v], ctx).value
     }
 
     const {server}=require('./exports/simple-template-server')
@@ -67,20 +70,23 @@ function cjs_server() {
 
     if(x.config) {
       const fn=path.resolve(x.config)
-      simpleINIParser(fs.readFileSync(fn, 'utf8'), fn, ini, (ini, cur, keys, params)=>{
-        if(cur!==keys[keys.length-1]) return;
-        const _key=keys.reduce((x, y, i)=>{
-          if(i) {
-            x+=y.charAt(0).toUpperCase()+y.substr(1)
-          }else{
-            x+=y
-          }
-          return x
-        }, '')
-        x[_key]=params.value
+      INIParser({
+        filename: fn,
+        mockFileContent: fs.readFileSync(default_ini, 'utf8')+'\n\n'+fs.readFileSync(fn, 'utf8'),
+        activeSections: ['cjs'],
+        onValue: ({keychain, value})=>{
+          const _key=keychain.reduce((x, y, i)=>{
+            if(i) {
+              x+=y.charAt(0).toUpperCase()+y.substr(1)
+            }else{
+              x+=y
+            }
+            return x
+          }, '')
+          x[_key]=value
+        }
       })
     }
-
 
     const options={
       dir: x.directory,
@@ -130,7 +136,7 @@ function cjs_cli() {
     const path=require('path')
     runAsCLI({
       entry: path.resolve(x.file),
-      uri: x.uri,
+      uri: x.requestUri,
       host: x.host,
       schema: x.schema,
     })

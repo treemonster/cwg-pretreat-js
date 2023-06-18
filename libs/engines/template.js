@@ -335,7 +335,7 @@ function _prehandleFile(syncMode, caches, {filename, mockFileContent, wrapper}, 
   let [ctx, _copy_singleton_]=getNewContext(caches, filename, globals, __SINGLETON__)
   const _singleton=__SINGLETON__ || _copy_singleton_
   let pctx=new Proxy(ctx, {
-    get: (target, prop)=>{
+    get: (target, prop, receiver)=>{
       const _old=getValue(target[prop], global[prop], _singleton.interfaces[prop])
       if(target!==ctx || _old!==undefined) return _old
 

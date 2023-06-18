@@ -1,9 +1,16 @@
 {
   "name": "cwg-pretreat-js",
-  "version": "3.2.3",
+  "version": "3.2.12",
   "engines": {
     "node": ">=12"
   },
+  "keywords": [
+    "macro", "define",
+    "php", "yaf", "server",
+    "webpack", "loader",
+    "cli",
+    "template"
+  ],
   "bin": {
     "cjs": "./cli.js"
   },

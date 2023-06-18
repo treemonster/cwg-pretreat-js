@@ -24,29 +24,8 @@ Application.YAF_STORAGE=Application.YAF_STORAGE || {
 
 const {
   loadOrSetCache,
-  simpleINIParser,
+  INIParser,
 }=utils
-
-
-const Yaf_Application_DefaultConfig_INI=`
-[yaf]
-
-environ = production
-ext = '.cjs'
-view.ext = '.chtml'
-modules='index'
-forward_limit = 5
-name_suffix = Controller
-name_separator = _
-
-dispatcher.catch_exception = 1
-dispatcher.throw_exception = 1
-dispatcher.default_module = 'index'
-dispatcher.default_controller = 'index'
-dispatcher.default_action = 'index'
-dispatcher.default_route =
-
-`
 
 
 class Yaf_Application{
@@ -56,49 +35,66 @@ class Yaf_Application{
   #_modules=null;
   #_running=null;
   #_environ=null;
-  constructor(config) {
+  constructor(config, environ) {
     if(typeof config==='string') {
       const appconf=loadOrSetCache(
         Application.YAF_STORAGE.caches,
-        {filename: config},
+        {filename: config, wrapper: (x, str)=>{
+          return loadOrSetCache(
+            Application.YAF_STORAGE.caches,
+            {filename: __dirname+'/yaf.default.ini'},
+          )+'\n\n'+str
+        }},
         inidata=>{
           const _routes=new Set
-          const vd=simpleINIParser(Yaf_Application_DefaultConfig_INI, '')
-          const v=simpleINIParser(inidata, config, vd, (ini, key, keys, params)=>{
-            if(key==='routes') {
-              _routes.add(keys[1])
-            }
+          const {ini, groups}=INIParser({
+            filename: config,
+            mockFileContent: inidata,
+            activeSections: ['yaf', environ],
+            onValue: ({input, keychain, rawValue})=>{
+              if(!environ && keychain[0]==='application' && keychain[1]==='environ') {
+                input.activeSections[1]=rawValue
+              }
+              if(keychain[0]==='routes') {
+                _routes.add(keychain[1])
+              }
+            },
           })
-          let {yaf: yafConfig}=v
-          yafConfig.modules=yafConfig.modules.split(',').map(a=>a.trim()).filter(a=>a)
-          if(!yafConfig.directory) {
-            throw new Error('you must specify the `directory` of the Yaf Application')
-          }
-          if(!yafConfig.bootstrap) {
-            yafConfig.bootstrap=yafConfig.directory+'/Bootstrap'+yafConfig.ext
-          }
-          yafConfig.routes=[..._routes].reduce((o, x)=>{
-            o.push(Object.assign({key: x}, yafConfig.routes[x]))
+
+          ini.application.modules=ini.application.modules.split(',').map(a=>a.trim()).filter(a=>a)
+
+          ini.routes=[..._routes].reduce((o, x)=>{
+            o.push(Object.assign({key: x}, ini.routes[x]))
             return o
           }, [])
-          tolower(yafConfig.modules)
-          tolower(yafConfig.dispatcher, [
+
+          tolower(ini.application.modules)
+          tolower(ini.application.dispatcher, [
            'default_module',
            'default_controller',
            'default_action',
            'default_route',
           ])
-          if(yafConfig.dispatcher.default_route) {
-            yafConfig.dispatcher.default_route=yafConfig.dispatcher.default_route.split('/').filter(a=>a)
+
+          if(ini.application.dispatcher.default_route) {
+            ini.application.dispatcher.default_route=ini.application.dispatcher.default_route.split('/').filter(a=>a)
           }
-          v.yaf=yafConfig
-          return v
+
+          const {application}=ini
+          if(!application.directory) {
+            throw new Error('`application.directory` must be specified')
+          }
+          if(!application.environ) {
+            throw new Error('`application.environ` must be specified')
+          }
+          return {ini, groups: groups[environ]}
         },
       )
-      // console.log(appconf)
+
+
       this.#config=appconf
-      this.#_modules=appconf.yaf.modules
-      this.#_environ=appconf.yaf.environ
+      this.#_environ=appconf.ini.application.environ
+      this.#_modules=appconf.ini.application.modules
       Yaf_Application.#_app=this
       this.#_running=this
       this.#dispatcher=new Yaf_Dispatcher(appconf)
@@ -111,7 +107,7 @@ class Yaf_Application{
     return Yaf_Application.#_app
   }
   async bootstrap() {
-    const Bootstrap=include_class_sync('Bootstrap', this.#config.yaf.bootstrap)
+    const Bootstrap=include_class_sync('Bootstrap', this.#config.ini.application.bootstrap)
     if(Object.getPrototypeOf(Bootstrap.prototype)!==Yaf_Bootstrap_Abstract.prototype) {
       throw new Error('The `Bootstrap` class must extend from the `Yaf_Bootstrap_Abstract` class.')
     }
@@ -139,10 +135,10 @@ class Yaf_Application{
   }
   */
   getAppDirectory() {
-    return this.#config.yaf.directory
+    return this.#config.ini.application.directory
   }
-  getConfig() {
-    return this.#config
+  getConfig(group) {
+    return group? this.#config.groups[group]: this.#config.ini
   }
   getDispatcher() {
     return this.#dispatcher
@@ -177,7 +173,7 @@ class Yaf_Dispatcher{
   #_forward_countdown=0;
 
   constructor(appconf) {
-    const {yaf: yafConfig}=appconf
+    const {application: yafConfig}=appconf.ini
     this.#_router=new Yaf_Router(appconf)
     this.#_view=new Yaf_View_Interface
     Yaf_Dispatcher.#_instance=this
@@ -240,6 +236,7 @@ class Yaf_Dispatcher{
         }
       }
     }catch(e) {
+      console.log(e)
       this.catchingException(e)
     }
   }
@@ -393,7 +390,7 @@ class Yaf_Controller_Abstract{
     // pass
   }
   initView() {
-    const yafConfig=Yaf_Application.app().getConfig().yaf
+    const yafConfig=Yaf_Application.app().getConfig().application
     const dispatcher=Yaf_Dispatcher.getInstance()
     let _path=yafConfig.directory+'/'
     if(this.#_module!=='index') _path+='modules/'+this.#_module+'/'
@@ -422,8 +419,7 @@ class Yaf_Router{
   #_current=null;
 
   constructor(appconf) {
-    const {yaf: yafConfig, _routes}=appconf
-    this.#_routes=yafConfig.routes
+    this.#_routes=appconf.ini.routes
   }
   // addConfig() {}
   // addRoute(name, route) {}
@@ -433,11 +429,11 @@ class Yaf_Router{
   _parseRoute(pathname, query) {
     // limit the maximum path length to ensure safety
     pathname=pathname.slice(0, 100)
-    const appconf=Yaf_Application.app().getConfig()
+    const app=Yaf_Application.app().getConfig().application
     const route={
-      module: appconf.yaf.dispatcher.default_module,
-      controller: appconf.yaf.dispatcher.default_controller,
-      action: appconf.yaf.dispatcher.default_action,
+      module: app.dispatcher.default_module,
+      controller: app.dispatcher.default_controller,
+      action: app.dispatcher.default_action,
     }
     const yaf_request=Yaf_Dispatcher.getInstance().getRequest()
     let route_matched=false
@@ -638,7 +634,7 @@ class Yaf_View_Interface{
   assign(data) {
     Object.assign(this.#_assigned_data, data)
   }
-  display(tpl='index'+Yaf_Application.app().getConfig().yaf.view.ext, tpl_vars) {
+  display(tpl='index'+Yaf_Application.app().getConfig().application.view.ext, tpl_vars) {
     include_file(path.resolve(this.getScriptPath(), tpl), Object.assign({}, this.#_assigned_data, tpl_vars))
   }
   getScriptPath() {
@@ -686,7 +682,7 @@ exports({
 function tolower(o, keys) {
   if(keys) {
     keys.map(a=>{
-      o[a]=o[a].toLowerCase()
+      if(o[a]) o[a]=o[a].toLowerCase()
     })
   }else{
     o.map((_, a)=>{
@@ -717,7 +713,9 @@ function existsFileSync(x) {
 
 
 async function _call_controller_action(module, controller, action, invoke_args, _disabledView) {
-  const yafConfig=Yaf_Application.app().getConfig().yaf
+  const yafConfig=Yaf_Application.app().getConfig().application
+  module=yafConfig.modules.find(a=>a.toLowerCase()===module.toLowerCase())
+  if(!module) return;
   const controller_classname=(module+yafConfig.name_separator+controller).toLowerCase()+yafConfig.name_suffix
   const controller_class_filename=get_autoload_callbacks().__autoload_classes(controller_classname)
   if(!existsFileSync(controller_class_filename)) return;
@@ -744,7 +742,8 @@ async function call_controller_action_only(...argv) {
 async function call_controller_action(...argv) {
   const p=await call_controller_action_only(...argv)
   if(p) return p
-  const call_argv=Yaf_Application.app().getConfig().yaf.dispatcher.default_route
+  const call_argv=Yaf_Application.app().getConfig().application.dispatcher.default_route
   if(!call_argv) return;
+  for(;call_argv.length<3;) call_argv.push('index')
   return await _call_controller_action(...call_argv, ...argv.slice(3))
 }

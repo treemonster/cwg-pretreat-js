@@ -166,6 +166,7 @@ async function CGI(CGI_options, COMMON_options, sharedGlobals, req, res) {
   const {
     pathname,
     query,
+    search: req_search,
   }=require('url').parse(req_fullurl)
   const req_pathname=path.normalize(unescape(pathname)).replace(/[\\\/]+/g, '/')
   const req_query=require('querystring').parse(query)
@@ -204,6 +205,7 @@ async function CGI(CGI_options, COMMON_options, sharedGlobals, req, res) {
     pathname: req_pathname,
     rawQuery: query,
     query: req_query,
+    search: req_search || '',
     method,
     headers,
     getPostData: async (asUTF8String=true)=>{
@@ -496,6 +498,7 @@ exports.runAsCLI=({
   const CGI_options={
     exts: ['.cjs'],
     index: [base],
+    error: entry,
   }
   const COMMON_options={
     silent: false,

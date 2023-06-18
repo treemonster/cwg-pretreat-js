@@ -82,7 +82,7 @@ const getopt=inited=>({
         {
             name: '<?js echo(result_display_keys[i]) ?>',
             type: 'line',
-            data: data.map(a=>a.data.<?js echo(result_display_keys[i]) ?>)
+						data: data.map(a=>a.data[<?js echo(JSON.stringify(result_display_keys[i])) ?>])
         },
       <?js } ?>
     ]
