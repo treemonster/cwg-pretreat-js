@@ -95,13 +95,13 @@ function parseINIValue(rawValue, ctx) {
     return o
   }, {
     values: [],
-    flag: null,
+    flag: undefined,
     comment: '',
   })
 
   const {values, flag, comment}=result
   return {
-    value: flag? flag: values.join(''),
+    value: flag===undefined? values.join(''): flag,
     rawValue: _rawValue.join(' '),
     comment,
   }

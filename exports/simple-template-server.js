@@ -11,12 +11,12 @@ const {
   getUniqueCode,
   loadBalance,
   isPackageFile,
-  getTimeRecorder,
-  getTimelineRecorder,
+  getAvailablePort,
 }=require('../libs/utils/base')
 
 const fs=require('fs')
 const path=require('path')
+const cluster=require('cluster')
 
 process.on('uncaughtException', e=>{
   console.log('uncaughtException:', e)
@@ -38,44 +38,6 @@ const MIME={
   'html': 'text/html; charset=utf8',
 }
 
-function get_memory_recorder() {
-
-  const seq_maxlen=7200 // records max count
-  const step_count=200 // records count of every request
-  const rec_frequence=1 // save checkpoints per second
-  const mem=getTimelineRecorder(seq_maxlen, step_count)
-
-  const mb=t=>(t/1024/1024).toFixed(2)
-
-  const run=_=>{
-    const {
-      rss,
-      heapTotal,
-      heapUsed,
-      external,
-    }=process.memoryUsage()
-    mem.push({
-      rss: mb(rss),
-      heapTotal: mb(heapTotal),
-      heapUsed: mb(heapUsed),
-      external: mb(external),
-    })
-    setTimeout(run, rec_frequence*1e3)
-  }
-  run()
-
-  function getMemoryInfo(after) {
-    return [
-      seq_maxlen,
-      rec_frequence,
-      mem.listAfter(after),
-    ]
-  }
-
-  return {getMemoryInfo}
-}
-
-let getMemoryInfo=null
 function startup(options) {
   const {
     COMMON_options,
@@ -86,7 +48,6 @@ function startup(options) {
 
   const {
     silent,
-    monitor,
   }=COMMON_options
 
   if(!silent && !isWorker) {
@@ -94,10 +55,6 @@ function startup(options) {
     console.log('`simple-template-server` is launching with the options below:')
     console.log(options)
     console.log('please wait ..')
-  }
-
-  if(monitor) {
-    getMemoryInfo=get_memory_recorder().getMemoryInfo
   }
 }
 
@@ -128,7 +85,6 @@ function start_server({
     walk: false,
   }
   const {
-    monitor=true,
     locally=false,
     silent=false,
   }=COMMON_options
@@ -198,7 +154,6 @@ async function CGI(CGI_options, COMMON_options, sharedGlobals, req, res) {
   	RUNTIME_MODE: 'CGI',
     CGI_options,
     COMMON_options,
-    getMemoryInfo,
     request: req,
     response: res,
     url: req_fullurl,
@@ -284,8 +239,8 @@ async function CGI(CGI_options, COMMON_options, sharedGlobals, req, res) {
   function _error_end(e) {
     response.statusCode=500
     delete response.headers['content-type']
-     _flushHeaders()
-    if(debugging || _debugging) {
+    _flushHeaders()
+    if(_debugging) {
       res.end(e.stack || 'unknown error')
     }else{
     	if(!silent) {
@@ -388,15 +343,13 @@ async function CGI(CGI_options, COMMON_options, sharedGlobals, req, res) {
 }
 
 
-function FastCGI(FastCGI_options, COMMON_options, isWorker=false) {
+function FastCGI(FastCGI_options, COMMON_options, isWorker=false, options={}) {
   const {
     dir='.',
     listen=9090,
-    monitorListen=0,
     ...CGI_options
   }=FastCGI_options
   const {
-    monitor=true,
     locally=true,
     silent=false,
   }=COMMON_options || {}
@@ -406,68 +359,52 @@ function FastCGI(FastCGI_options, COMMON_options, isWorker=false) {
     FastCGI_options,
     RUNTIME_MODE: isWorker? 'FPM': 'FastCGI',
   }
+  Object.assign(sharedGlobals, options.sharedGlobals || {})
   start_server({
     listen,
     CGI_options,
     COMMON_options,
     sharedGlobals,
   })
+  if(process.env.FPM_externalPort) {
+    start_server({
+      listen: process.env.FPM_externalPort,
+      CGI_options,
+      COMMON_options,
+      sharedGlobals,
+    })
+  }
   if(!isWorker) {
     !silent && log_server_info('[FastCGI]', listen, locally)
   }
-  if(monitor) {
-    start_server({
-      listen: monitorListen,
-      CGI_options: null,
-      COMMON_options: Object.assign({}, COMMON_options, isWorker? {silent: true}: {}),
-      sharedGlobals: {
-        isMaster: false,
-        workerData: {
-          monitorPort: monitorListen,
-        },
-        basedir: __dirname+'/simple-template-server/monitors',
-        Application: {},
-        RUNTIME_MODE: isWorker? 'FPM': 'FastCGI',
-      },
-    })
-    if(!isWorker) {
-      !silent && log_server_info('[FastCGI Monitor]', monitorListen, locally)
-    }
-  }
 }
 
 
-function FPM(FPM_options, FastCGI_options, COMMON_options) {
-  const {workers, listen: masterPort}=FPM_options
-  loadBalance(workers, availablePort=>{
+async function FPM(FPM_options, FastCGI_options, COMMON_options) {
+  const {workers}=FPM_options
+  loadBalance(workers, _=>{
     FastCGI(
-      Object.assign({}, FastCGI_options, {monitorListen: availablePort}),
+      FastCGI_options,
       COMMON_options,
       true,
     )
-  }, workersData=>{
-    if(COMMON_options.monitor) {
-      start_server({
-        listen: masterPort,
-        CGI_options: null,
-        COMMON_options,
+  }, masterData=>{
+    FastCGI(
+      Object.assign({}, FastCGI_options, {
+        listen: masterData.masterExternalPort,
+      }),
+      COMMON_options,
+      false,
+      {
         sharedGlobals: {
-          isMaster: true,
-          masterData: {
-            monitorPort: masterPort,
-            workersData,
-          },
-          basedir: __dirname+'/simple-template-server/monitors',
-          Application: {},
-          RUNTIME_MODE: 'FPM',
+          RUNTIME_MODE: 'FPM_Master',
+          masterData,
         },
-      })
-      !COMMON_options.silent && log_server_info('[FPM Monitor]', masterPort, COMMON_options.locally)
-    }
+      },
+    )
     !COMMON_options.silent && log_server_info('[FPM Workers]', FastCGI_options.listen, COMMON_options.locally)
   })
 }
-
 
 exports.server=(options)=>{
   const {
@@ -475,11 +412,12 @@ exports.server=(options)=>{
     fpm: FPM_options=null,
     ...FastCGI_options
   }=options
+
   startup({
     COMMON_options,
     FastCGI_options,
     FPM_options,
-    isWorker: !require('cluster').isWorker,
+    isWorker: cluster.isWorker,
   })
   if(!FPM_options) {
     FastCGI(FastCGI_options, COMMON_options)

@@ -1,6 +1,6 @@
 const path=require('path')
 const vm=require('vm')
-const {defer, loadOrSetCache, getTimeRecorder}=require('../utils/base')
+const {defer, sleep, loadOrSetCache, getTimeRecorder}=require('../utils/base')
 
 
 const FLAG_OPEN='<?js'
@@ -268,6 +268,7 @@ function getNewContext(caches, filename, globals, __SINGLETON__) {
     include_class_sync,
 
     defer,
+    sleep,
 
     require,
 

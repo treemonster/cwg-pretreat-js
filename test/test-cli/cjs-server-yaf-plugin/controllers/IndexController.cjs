@@ -15,6 +15,7 @@ class IndexController extends BaseController {
     }else{
       echo('guest')
     }
+    info()
   }
   async aaAction() {
     echo('<h1>this is aaAction of IndexController</h1>')
@@ -34,5 +35,10 @@ class IndexController extends BaseController {
 
     // console.log(Object.keys(global).join(' '))
 
+  }
+  defaultAction() {
+    if(pathname.indexOf('/js/')===0) {
+      endWithFile(__ASSETS_PATH__+pathname)
+    }
   }
 }

@@ -236,7 +236,6 @@ class Yaf_Dispatcher{
         }
       }
     }catch(e) {
-      console.log(e)
       this.catchingException(e)
     }
   }
@@ -349,7 +348,7 @@ class Yaf_Controller_Abstract{
       ...([this.#_module, this.#_name].slice(0, 3-argv.length)),
       ...argv,
       invoke_args,
-      true,
+      false,
     ]
     const p=await call_controller_action_only(...call_argv)
     if(!p) {

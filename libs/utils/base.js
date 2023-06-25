@@ -139,35 +139,37 @@ function getUniqueCode() {
 }
 
 
-const WORKER_PRIVATE_PORT=getUniqueCode()
+
 async function loadBalance(workersCount, workerHandler, masterHandler, silentMode=false) {
   const cluster=require('cluster')
   const log=silentMode? (_=>0): (...x)=>console.log(...x)
   if (cluster.isWorker) {
     log(`worker ${process.pid} started`)
-    workerHandler(process.env.FPM_externalPort)
+    workerHandler()
   }else{
     log(`Master ${process.pid} is running, workers count: ${workersCount}`)
     let workersCounter=0
-    let workersData={}
+    let masterData={
+      masterExternalPort: await getAvailablePort(),
+      workers: {},
+    }
     const fork_worker=async idx=>{
       if(workersCounter>=workersCount) return;
       workersCounter++
-      const FPM_externalPort=await getAvailablePort()
-      const worker=cluster.fork({
-        FPM_externalPort,
+      const nextWorkerData={
         FPM_workerIndex: idx,
         FPM_workersCount: workersCount,
-      })
-      const pid=worker.process.pid
-      workersData[pid]={
-        FPM_externalPort,
+        FPM_externalPort: await getAvailablePort(),
+        FPM_masterExternalPort: masterData.masterExternalPort,
       }
+      const worker=cluster.fork(nextWorkerData)
+      const pid=worker.process.pid
+      masterData.workers[pid]=nextWorkerData
     }
     cluster.on('exit', (worker, code, signal) => {
       const pid=worker.process.pid
       log(`worker ${pid} died`)
-      const _idx=workersData[pid].workerIndex
+      const _idx=workersData[pid].FPM_workerIndex
       delete workersData[pid]
       workersCounter--
       fork_worker(_idx)
@@ -175,10 +177,16 @@ async function loadBalance(workersCount, workerHandler, masterHandler, silentMod
     for(let i=0; i<workersCount; i++) {
       fork_worker(i)
     }
-    masterHandler(workersData)
+    masterHandler(masterData)
   }
 }
 
+/**
+ This functionality could potentially cause a problem with memory usage
+ if used incorrectly. It is important to ensure that your program does not
+ insert any large objects into the sequential array, and that the `maxlen`
+ value is not set too high.
+ */
 function getTimelineRecorder(maxlen, stepcount) {
   const seq=[]
   function push(x) {
@@ -197,6 +205,17 @@ function getTimelineRecorder(maxlen, stepcount) {
     push,
     listAfter,
   }
+}
+
+function sleep(t) {
+  let _h=0
+  const p=new Promise(r=>{
+    _h=setTimeout(r, t)
+  })
+  p.cancel=_=>{
+    clearTimeout(_h)
+  }
+  return p
 }
 
 const {
@@ -218,6 +237,7 @@ module.exports={
   loadBalance,
   isPackageFile,
   getTimelineRecorder,
+  sleep,
   INIParser,
   parseINIValue,
   filename2INIContext,

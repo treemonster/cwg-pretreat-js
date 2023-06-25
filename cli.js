@@ -54,7 +54,7 @@ function cjs_server() {
   const default_ini=__dirname+'/cjs-server.ini'
   const {comments, groups, ini, ctx}=INIParser({
     filename: default_ini,
-    activeAllSections: ['cjs'],
+    activeAllSections: ['server'],
     onValue: ({keychain, comment, rawValue})=>{
       p.option('--'+keychain.join('-')+' <string>', comment, rawValue)
     },
@@ -91,7 +91,6 @@ function cjs_server() {
     const options={
       dir: x.directory,
       listen: x.port,
-      monitorListen: x.managerPort,
       exts: parse_multi_value(x.extensions),
       index: parse_multi_value(x.entryIndex),
       error: x.entryError_absolute_path && path.resolve(x.directory, x.entryError_absolute_path),
@@ -100,7 +99,6 @@ function cjs_server() {
       debugging: x.debug_mode,
 
       common: {
-        monitor: x.managerEnable,
         locally: x.locally,
         silent: x.silent_mode,
       },
@@ -109,12 +107,7 @@ function cjs_server() {
     if(x.fpmEnable) {
       options.fpm={
         workers: x.fpmWorkers,
-        listen: x.managerPort,
       }
-    }
-
-    if(!options.common.silent) {
-      console.log('options:', options)
     }
 
     server(options)
