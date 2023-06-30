@@ -437,6 +437,7 @@ exports.runAsCLI=({
     exts: ['.cjs'],
     index: [base],
     error: entry,
+    walk: false,
   }
   const COMMON_options={
     silent: false,

@@ -169,8 +169,8 @@ async function loadBalance(workersCount, workerHandler, masterHandler, silentMod
     cluster.on('exit', (worker, code, signal) => {
       const pid=worker.process.pid
       log(`worker ${pid} died`)
-      const _idx=workersData[pid].FPM_workerIndex
-      delete workersData[pid]
+      const _idx=masterData.workers[pid].FPM_workerIndex
+      delete masterData.workers[pid]
       workersCounter--
       fork_worker(_idx)
     })
@@ -178,32 +178,6 @@ async function loadBalance(workersCount, workerHandler, masterHandler, silentMod
       fork_worker(i)
     }
     masterHandler(masterData)
-  }
-}
-
-/**
- This functionality could potentially cause a problem with memory usage
- if used incorrectly. It is important to ensure that your program does not
- insert any large objects into the sequential array, and that the `maxlen`
- value is not set too high.
- */
-function getTimelineRecorder(maxlen, stepcount) {
-  const seq=[]
-  function push(x) {
-    seq.push({data: x, time: Date.now()})
-    if(seq.length<=maxlen) return;
-    seq.shift()
-  }
-  function listAfter(t) {
-    for(let i=0; i<seq.length; i++) {
-      if(seq[i].time<=t) continue
-      return seq.slice(i, stepcount+i)
-    }
-    return []
-  }
-  return {
-    push,
-    listAfter,
   }
 }
 
@@ -236,7 +210,6 @@ module.exports={
   getUniqueCode,
   loadBalance,
   isPackageFile,
-  getTimelineRecorder,
   sleep,
   INIParser,
   parseINIValue,

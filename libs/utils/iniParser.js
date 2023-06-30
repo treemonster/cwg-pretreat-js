@@ -70,7 +70,7 @@ function parseINIValue(rawValue, ctx) {
         o.values.push(ctx[value])
         return o
       }
-      const maybe_flag=parsed.length===1
+      const maybe_flag=parsed.filter(a=>a.type!==T_COMMENT).length===1
       if(!maybe_flag) {
         o.values.push(value)
         return o
@@ -204,7 +204,7 @@ module.exports={
 console.log(INIParser({
   filename: '/home/yaf.ini',
   mockFileContent: `
-    [yaf] ; yaf section 
+    [yaf] ; yaf section
     ; xxx
     application.environ = "product" ; environ
     application.directory = __dirname "/.."
@@ -235,4 +235,3 @@ console.log(INIParser({
   },
 }))
 */
-
