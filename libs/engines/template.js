@@ -66,8 +66,12 @@ function transformToAst(tokens, filename, isSyncMode) {
     }
   }
   const hardCodedStr=Object.keys(hardCoded).map(k=>`const ${k}=${JSON.stringify(hardCoded[k])};`).join('\n')
+  const secureHooks=`
+    setTimeout.constructor.prototype.constructor=(_=>{}).constructor
+  `
   const code=isSyncMode? `
   ; (_=>{
+    ${secureHooks}
     try{
       (_=>{
         const __INVISIBLE__=null
@@ -81,6 +85,7 @@ function transformToAst(tokens, filename, isSyncMode) {
   })()
   `:`
   ; (async _=>{
+    ${secureHooks}
     try{
       await (async _=>{
         const __INVISIBLE__=null
@@ -93,7 +98,7 @@ function transformToAst(tokens, filename, isSyncMode) {
     }
   })()
   `
-  return new vm.Script(code)
+  return new vm.Script(code, filename)
 }
 
 /**
@@ -261,6 +266,9 @@ function getNewContext(caches, filename, globals, __SINGLETON__) {
     return class_instance.library_class
   }
 
+  const __cjs_dirname=path.resolve(filename+'/..')
+  const rr=require.resolve
+
   const ctx={
     exports,
     include_file,
@@ -270,7 +278,14 @@ function getNewContext(caches, filename, globals, __SINGLETON__) {
     defer,
     sleep,
 
-    require,
+    require: x=>{
+      return require(!rr.paths(x)? x: rr(x, {
+        paths: [
+          __cjs_dirname,
+          __cjs_dirname+'/node_modules',
+        ],
+      }))
+    },
 
     utils: require('../utils/base'),
 

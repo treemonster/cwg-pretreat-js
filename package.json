@@ -1,6 +1,6 @@
 {
   "name": "cwg-pretreat-js",
-  "version": "3.2.25",
+  "version": "3.2.26",
   "engines": {
     "node": ">=12"
   },
