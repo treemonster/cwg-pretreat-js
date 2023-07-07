@@ -1,8 +1,8 @@
 
 const {
   prehandleFileAsync,
-  getNewContext,
 }=require('../libs/engines/template')
+const utils=require('../libs/utils/base')
 const {
   defer,
   readrs,
@@ -12,7 +12,7 @@ const {
   loadBalance,
   isPackageFile,
   getAvailablePort,
-}=require('../libs/utils/base')
+}=utils
 
 const fs=require('fs')
 const path=require('path')
@@ -114,6 +114,7 @@ async function CGI(CGI_options, COMMON_options, sharedGlobals, req, res) {
   }=CGI_options
   const {
   	silent=false,
+    security={},
   }=COMMON_options
   const {basedir}=sharedGlobals
 
@@ -308,22 +309,27 @@ async function CGI(CGI_options, COMMON_options, sharedGlobals, req, res) {
     }
   }
 
-  prehandleFileAsync(_access_file, globals, null, {
+  prehandleFileAsync(_access_file, globals, {
     beforeExecuteSync: (ctx, __SINGLETON__)=>{
-      // this is the entry of request handler
-      // following code will only be called once a new request comes
+      // This is the entry of request handler.
+      // The following code will only be called once a new request comes.
 
       const {interfaces, shared}=__SINGLETON__
 
-      // auto load plugins
-      // plugins are a special type of library
-      // so they should follow the rules of library
-      // every plugin should export its public functions
+      // The following code will auto load system plugins.
+      // We have prevented some dangerous behaviors by the security policy.
+      // But the system plugins should still work with some of them.
+      // So we must provide the necessary variables explicitly when including the system plugins.
+      // And pollute the prototype chain to prevent attacks from the custom code after the plugins
+      // have been loaded.
       for(let key in plugins) {
-        ctx.include_library_sync(key, plugins[key])
+        ctx.include_library_sync(key, plugins[key], {
+          require,
+          utils,
+        })
       }
 
-      // define function let users can define a global variable
+      // The define function let users can define a global variable.
       interfaces.define=(k, v)=>{
         if(interfaces[k]) {
           throw new Error('`'+k+'` has already been defined')
@@ -335,7 +341,7 @@ async function CGI(CGI_options, COMMON_options, sharedGlobals, req, res) {
       }
 
     },
-  }).then(({output})=>{
+  }, security).then(({output})=>{
     if(response.alreadyResponsed) return;
     _flushHeaders()
     res.end(output)

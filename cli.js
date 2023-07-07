@@ -101,6 +101,12 @@ function cjs_server() {
       common: {
         locally: x.locally,
         silent: x.silent_mode,
+        security: {
+          disableEval: x.securityDisable_eval,
+          disableProcess: x.securityDisable_process,
+          disableRequire: x.securityDisable_require,
+          disableUtils: x.securityDisable_utils,
+        },
       },
     }
 

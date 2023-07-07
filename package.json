@@ -1,13 +1,17 @@
 {
   "name": "cwg-pretreat-js",
-  "version": "3.2.26",
+  "version": "3.3.4",
   "engines": {
     "node": ">=12"
   },
   "keywords": [
-    "macro", "define",
-    "php", "yaf", "server",
-    "webpack", "loader",
+    "macro",
+    "define",
+    "php",
+    "yaf",
+    "server",
+    "webpack",
+    "loader",
     "cli",
     "template"
   ],
@@ -22,6 +26,7 @@
     "test:cli": "bash test/test-cli.sh"
   },
   "dependencies": {
-    "commander": "^10.0.1"
+    "commander": "^10.0.1",
+    "react": "^18.2.0"
   }
 }

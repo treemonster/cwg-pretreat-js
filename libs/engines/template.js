@@ -1,3 +1,5 @@
+'use strict'
+
 const path=require('path')
 const vm=require('vm')
 const {defer, sleep, loadOrSetCache, getTimeRecorder}=require('../utils/base')
@@ -66,12 +68,8 @@ function transformToAst(tokens, filename, isSyncMode) {
     }
   }
   const hardCodedStr=Object.keys(hardCoded).map(k=>`const ${k}=${JSON.stringify(hardCoded[k])};`).join('\n')
-  const secureHooks=`
-    setTimeout.constructor.prototype.constructor=(_=>{}).constructor
-  `
   const code=isSyncMode? `
   ; (_=>{
-    ${secureHooks}
     try{
       (_=>{
         const __INVISIBLE__=null
@@ -85,7 +83,6 @@ function transformToAst(tokens, filename, isSyncMode) {
   })()
   `:`
   ; (async _=>{
-    ${secureHooks}
     try{
       await (async _=>{
         const __INVISIBLE__=null
@@ -101,98 +98,203 @@ function transformToAst(tokens, filename, isSyncMode) {
   return new vm.Script(code, filename)
 }
 
+const __UNSAFE__={
+  eval: x=>eval(x),
+}
+
 /**
- there are three special variables in the context object:
- 1. __UNSAFE__: provides some functions that are considered unsafe, but are necessary in specific situations
- 2. __INVISIBLE__: provides some functions that are used by the engine's main thread
- 3. __SINGLETON__: provides some functions that can be shared across different contexts
+ This object should be a singleton in every instance.
  */
-function unsafeHandler(x) {
-  return _=>{
-    throw new Error('calling `'+x+'` directly is forbidden, use `__UNSAFE__.'+x+'` instead')
+function getControllableGlobal() {
+  return {
+
+    // nodejs
+    setTimeout,
+    setInterval,
+    clearTimeout,
+    clearInterval,
+    queueMicrotask,
+    clearImmediate,
+    setImmediate,
+
+    console,
+    Buffer,
+    process,
+
+    eval: __UNSAFE__.eval,
+
+    TextDecoder,
+    TextEncoder,
+    URL,
+    URLSearchParams,
+
+    Promise,
+
+    // v8
+    JSON,
+    RegExp,
+    Object,
+    Array,
+    String,
+    Number,
+    Boolean,
+    Date,
+    Math,
+    Function,
+    Set, WeakSet,
+    Map, WeakMap,
+    Proxy,
+    Symbol,
+
+    escape, unescape,
+    encodeURI, decodeURI,
+    encodeURIComponent, decodeURIComponent,
+    isNaN, isFinite,
+    parseInt, parseFloat,
+
   }
 }
-function getNewContext(caches, filename, globals, __SINGLETON__) {
-  const _outputCompleted=defer()
-  const _output=['']
-  __SINGLETON__=__SINGLETON__ || {
-    // properties written in `interfaces` are shared during the request threading
-    interfaces: {
 
-      __UNSAFE__: {
-        eval: x=>{
-          return eval(x)
-        },
-
-        // you can also use the following code to access the global context:
-        // require.constructor('return this')()
-        global,
-
-      },
-      eval: unsafeHandler('eval'),
-
-      time_recorder: getTimeRecorder(),
-      echo: (...argv)=>{
-        (__SINGLETON__.shared.ob.opened? __SINGLETON__.shared.ob.output: _output).push(...argv)
-      },
-      ob_open: _=>{
-        if(__SINGLETON__.shared.ob.opened) {
-          throw new Error('ob_open() cannot been called when it has already opened')
-        }
-        __SINGLETON__.shared.ob.opened=true
-        __SINGLETON__.shared.ob.output=['']
-      },
-      ob_close: _=>{
-        if(!__SINGLETON__.shared.ob.opened) {
-          throw new Error('you must call ob_open() before calling ob_close()')
-        }
-        __SINGLETON__.shared.ob.opened=false
-      },
-      ob_get_string: async _=>{
-        const v=Promise.all(__SINGLETON__.shared.ob.output)
-        __SINGLETON__.shared.ob.output=['']
-        return (await v).join('')
-      },
-
-      __autoload_classes: func=>{
-        __SINGLETON__.shared.modules.__autoload_classes_callback=func
-      },
-      __autoload_libraries: func=>{
-        __SINGLETON__.shared.modules.__autoload_libraries_callback=func
-      },
-      get_autoload_callbacks: _=>{
-        return {
-          __autoload_classes: __SINGLETON__.shared.modules.__autoload_classes_callback,
-          __autoload_libraries: __SINGLETON__.shared.modules.__autoload_libraries_callback,
-        }
-      },
-
-    },
-
-    // shared properties do not need to display for users
-    shared: {
-      ob: {
-        opened: false,
-        output: [''],
-      },
-
-      // `modules` includes library functions and declared classes.
-      // Their compilers will be called in sync mode, which is different from other executable files.
-      // They should comply with the following rules:
-      // 1. Their names must be unique.
-      // 2. The global `await` symbol is not available due to the sync mode.
-      // 3. You should via `__autoload_xx` functions to load them automatically instead of using `include_file` directly.
-      modules: {
-        __autoload_classes_callback: null,
-        __autoload_libraries_callback: null,
-        __autoload_classes_wrapper: (class_filename, content)=>{
-          return content+'\n\nexports({library_class: '+path.parse(class_filename).name+'})'
-        },
-      },
-
-    },
-
+function getPrevented(x, isFunc) {
+  if(isFunc) return _=>{
+    throw new Error(`The ${x} function has been disabled by the policy`)
   }
+  return new Error(`The ${x} object has been disabled by the policy`)
+}
+
+const _preventEval=getPrevented('eval', 1)
+const _preventRequire=getPrevented('require', 1)
+const _preventProcess=getPrevented('process', 0)
+const _preventUtils=getPrevented('utils', 0)
+
+// Prevent access to global variables through Function's prototype chain
+; (_=>{
+  const v=new vm.Script(`
+    func.constructor.prototype.constructor=(_=>{}).constructor
+    for(let k in self) {
+      if(k==='self') continue
+      delete self[k]
+    }
+    delete self.self
+  `)
+  const ctx={
+    func: _=>{},
+    eval: _preventEval,
+  }
+  ctx.self=ctx
+  v.runInNewContext(ctx)
+})()
+
+
+/**
+ The `getRequireCallable` function provides a secure method for using custom modules, and limits the use of core modules.
+ */
+function getRequireCallable(caches, filename, controllableGlobal, security) {
+  function _require_callable(x) {
+    // `null` means the target is a core module provided by the nodejs runtime
+    if(require.resolve.paths(x)===null) {
+      return require(x)
+    }
+    const __cjs_dirname=path.resolve(filename+'/..')
+    const custom_module_path=require.resolve(x, {
+      paths: [
+        __cjs_dirname,
+        __cjs_dirname+'/node_modules',
+      ],
+    })
+    return require(custom_module_path)
+  }
+  _require_callable.cache=require.cache
+  return _require_callable
+}
+
+
+/**
+ there are three special variables in the context object:
+ 1. __INVISIBLE__: provides some functions that are used by the engine's main thread
+ 2. __SINGLETON__: provides some functions that can be shared across different contexts
+ */
+function getNewContext(caches, filename, globals, options) {
+
+  const {main, security}=options
+
+  const _outputCompleted=defer()
+
+  if(!main.__SINGLETON__) {
+    main.__SINGLETON__={
+
+      // properties written in `interfaces` are shared during the request threading
+      interfaces: {
+        securityConfig: JSON.parse(JSON.stringify(options.security)),
+        eval: x=>main.controllableGlobal.eval(x),
+        time_recorder: getTimeRecorder(),
+        echo: (...argv)=>{
+          (__SINGLETON__.shared.ob.opened?
+            __SINGLETON__.shared.ob.output:
+            __SINGLETON__.shared.output
+          ).push(...argv)
+        },
+        ob_open: _=>{
+          if(__SINGLETON__.shared.ob.opened) {
+            throw new Error('ob_open() cannot been called when it has already opened')
+          }
+          __SINGLETON__.shared.ob.opened=true
+          __SINGLETON__.shared.ob.output=['']
+        },
+        ob_close: _=>{
+          if(!__SINGLETON__.shared.ob.opened) {
+            throw new Error('you must call ob_open() before calling ob_close()')
+          }
+          __SINGLETON__.shared.ob.opened=false
+        },
+        ob_get_string: async _=>{
+          const v=Promise.all(__SINGLETON__.shared.ob.output)
+          __SINGLETON__.shared.ob.output=['']
+          return (await v).join('')
+        },
+
+        __autoload_classes: func=>{
+          __SINGLETON__.shared.modules.__autoload_classes_callback=func
+        },
+        __autoload_libraries: func=>{
+          __SINGLETON__.shared.modules.__autoload_libraries_callback=func
+        },
+        get_autoload_callbacks: _=>{
+          return {
+            __autoload_classes: __SINGLETON__.shared.modules.__autoload_classes_callback,
+            __autoload_libraries: __SINGLETON__.shared.modules.__autoload_libraries_callback,
+          }
+        },
+
+      },
+
+      // shared properties do not need to display for users
+      shared: {
+        output: [''],
+        ob: {
+          opened: false,
+          output: [''],
+        },
+
+        // `modules` includes library functions and declared classes.
+        // Their compilers will be called in sync mode, which is different from other executable files.
+        // They should comply with the following rules:
+        // 1. Their names must be unique.
+        // 2. The global `await` symbol is not available due to the sync mode.
+        // 3. You should via `__autoload_xx` functions to load them automatically instead of using `include_file` directly.
+        modules: {
+          __autoload_classes_callback: null,
+          __autoload_libraries_callback: null,
+          __autoload_classes_wrapper: (class_filename, content)=>{
+            return content+'\n\nexports({library_class: '+path.parse(class_filename).name+'})'
+          },
+        },
+
+      },
+
+    }
+  }
+  const __SINGLETON__=main.__SINGLETON__
   const exports=obj=>{
     for(let k in obj) {
       if(ctx[k]) {
@@ -207,7 +309,8 @@ function getNewContext(caches, filename, globals, __SINGLETON__) {
       caches,
       {filename: _filename, wrapper: null},
       Object.assign({}, private_datas, globals),
-      __SINGLETON__,
+      null,
+      options,
     )
     return _exports
   }
@@ -222,19 +325,23 @@ function getNewContext(caches, filename, globals, __SINGLETON__) {
       caches,
       {filename: _filename, wrapper},
       Object.assign({}, private_datas, globals),
-      __SINGLETON__,
+      null,
+      options,
     )
     return _exports
   }
-  const include_library_sync=(libraryname, lib_filename)=>{
+  const include_library_sync=(libraryname, lib_filename, private_datas=null)=>{
     if(ctx[libraryname]) {
       throw new Error('`'+libraryname+'` already exists')
     }
-    const lib_instance=_include_file_sync(lib_filename, null, null)
+    const lib_instance=_include_file_sync(lib_filename, private_datas, null)
     const {plugin, library_functions}=lib_instance
     if(!library_functions) {
       throw new Error('`'+lib_filename+'` did not export any public functions, please revise the fatal error by using `exports({library_functions: ...})` or do not use this file as a library')
     }
+
+    library_functions.constructor.constructor.prototype.constructor=Function
+
     const {interfaces, shared}=__SINGLETON__
     if(plugin) {
       Object.assign(ctx, library_functions)
@@ -266,37 +373,23 @@ function getNewContext(caches, filename, globals, __SINGLETON__) {
     return class_instance.library_class
   }
 
-  const __cjs_dirname=path.resolve(filename+'/..')
-  const rr=require.resolve
-
   const ctx={
     exports,
     include_file,
     include_library_sync,
     include_class_sync,
-
     defer,
     sleep,
-
-    require: x=>{
-      return require(!rr.paths(x)? x: rr(x, {
-        paths: [
-          __cjs_dirname,
-          __cjs_dirname+'/node_modules',
-        ],
-      }))
-    },
-
-    utils: require('../utils/base'),
-
-    ...globals,
-
+    require: security.disableRequire?
+      _preventRequire:
+      getRequireCallable(caches, filename, main.controllableGlobal, security),
+    utils: security.disableUtils? _preventUtils: require('../utils/base'),
   }
-  Object.assign(ctx, __SINGLETON__.interfaces)
+  Object.assign(ctx, globals, __SINGLETON__.interfaces)
   ctx.__INVISIBLE__={
     getOutput: async _=>{
       await _outputCompleted.promise
-      const op=await Promise.all(_output)
+      const op=await Promise.all(__SINGLETON__.shared.output)
       return op.join('')
     },
     done: e=>{
@@ -311,8 +404,8 @@ function getNewContext(caches, filename, globals, __SINGLETON__) {
       if(e) throw e
     },
   }
-  ctx.global=Object.assign({}, ctx, {__INVISIBLE__: null})
-  return [ctx, __SINGLETON__]
+  ctx.global=Object.assign({}, ctx, main.controllableGlobal, {__INVISIBLE__: null})
+  return ctx
 }
 async function executeVM(ctx, vm) {
   vm.runInNewContext(ctx)
@@ -329,12 +422,18 @@ function getValue(...a) {
   }
 }
 
-function _prehandleFile(syncMode, caches, {filename, mockFileContent, wrapper}, globals, __SINGLETON__, emitters) {
+function _prehandleFile(syncMode, caches, {filename, mockFileContent, wrapper}, globals, emitters, options={
+  main, security,
+}) {
+  const {main, security}=options
+  if(!main || !security) throw new Error('The required parameter is missing.')
+
   const {
     beforeExecuteSync, // change attribues of the context
   }=emitters || {}
+
   const [astvm, get_clean_exports]=loadOrSetCache(caches, {filename, mockFileContent, wrapper}, fileContent=>{
-    const ctx=getNewContext(caches, filename, {})
+    const ctx=getNewContext(caches, filename, {}, options)
     let _filters=new Set(Object.keys(ctx))
     function get_clean_exports(ctx) {
       let _ctx={}
@@ -348,17 +447,20 @@ function _prehandleFile(syncMode, caches, {filename, mockFileContent, wrapper}, 
     const astvm=transformToAst(tokens, filename, syncMode)
     return [astvm, get_clean_exports]
   })
-  let [ctx, _copy_singleton_]=getNewContext(caches, filename, globals, __SINGLETON__)
-  const _singleton=__SINGLETON__ || _copy_singleton_
+  let ctx=getNewContext(caches, filename, globals, options)
+  const {
+    __SINGLETON__,
+    controllableGlobal,
+  }=main
   let pctx=new Proxy(ctx, {
     get: (target, prop, receiver)=>{
-      const _old=getValue(target[prop], global[prop], _singleton.interfaces[prop])
+      const _old=getValue(target[prop], controllableGlobal[prop], __SINGLETON__.interfaces[prop])
       if(target!==ctx || _old!==undefined) return _old
 
       const {
         __autoload_classes_callback,
         __autoload_libraries_callback,
-      }=_singleton.shared.modules
+      }=__SINGLETON__.shared.modules
 
       let _filename=null
 
@@ -376,7 +478,7 @@ function _prehandleFile(syncMode, caches, {filename, mockFileContent, wrapper}, 
     }
   })
   if(beforeExecuteSync) {
-    beforeExecuteSync(pctx, _singleton)
+    beforeExecuteSync(pctx, __SINGLETON__)
   }
 
   return {
@@ -398,8 +500,8 @@ async function prehandleFileAsync(...argv) {
 }
 
 
-// this function is used for mounting libraries and classes
-// it is not a public function that should not be used in custom code directly
+// This function is used for mounting libraries and classes
+// It is not a public function that should not be used in custom code directly
 function prehandleFileSync(...argv) {
   const {pctx, astvm, get_clean_exports}=_prehandleFile(true, ...argv)
   executeVMSync(pctx, astvm)
@@ -409,13 +511,38 @@ function prehandleFileSync(...argv) {
 }
 
 
+function buildOption(securityConfig) {
+  securityConfig=securityConfig || {}
+  const options={
+    main: {
+      __SINGLETON__: null,
+      controllableGlobal: getControllableGlobal(),
+    },
+    security: {
+      disableEval: securityConfig.disableEval || false,
+      disableRequire: securityConfig.disableRequire || false,
+      disableProcess: securityConfig.disableProcess || false,
+      disableUtils: securityConfig.disableUtils || false,
+    },
+  }
+  if(options.security.disableEval) {
+    options.main.controllableGlobal.eval=_preventEval
+    global.eval=_preventEval
+  }
+  if(options.security.disableProcess) {
+    options.main.controllableGlobal.process=_preventProcess
+    global.process=_preventProcess
+  }
+  return options
+}
+
 
 const caches={}
 module.exports={
-  prehandleFileAsync: (file, globals, __SINGLETON__, emitters)=>{
+  prehandleFileAsync: (file, globals, emitters, securityConfig)=>{
     if(typeof file==='string') {
       file={filename: file}
-    } // {filename, mockFileContent}
-    return prehandleFileAsync(caches, file, globals, __SINGLETON__, emitters)
+    }
+    return prehandleFileAsync(caches, file, globals, emitters, buildOption(securityConfig))
   },
 }
