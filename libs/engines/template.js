@@ -123,6 +123,13 @@ function getControllableGlobal() {
 
     eval: __UNSAFE__.eval,
 
+    // The `Function` is a dangerous object because it plays a special role in Javascript.
+    // It is the ancestor of all the Javascript objects.
+    // In other words, all variables can get the `Function` object by traversing their prototype chains.
+    // We can use the `Function` as a constructor to execute some custom code strings, and the scope of them is the global context.
+    // That is why we have to provide a controllable `Function` object instead of the default one.
+    Function: Function.prototype.constructor,
+
     TextDecoder,
     TextEncoder,
     URL,
@@ -140,7 +147,6 @@ function getControllableGlobal() {
     Boolean,
     Date,
     Math,
-    Function,
     Set, WeakSet,
     Map, WeakMap,
     Proxy,
@@ -180,6 +186,7 @@ const _preventUtils=getPrevented('utils', 0)
   const ctx={
     func: _=>{},
     eval: _preventEval,
+    global: {},
   }
   ctx.self=ctx
   v.runInNewContext(ctx)
@@ -339,9 +346,7 @@ function getNewContext(caches, filename, globals, options) {
     if(!library_functions) {
       throw new Error('`'+lib_filename+'` did not export any public functions, please revise the fatal error by using `exports({library_functions: ...})` or do not use this file as a library')
     }
-
     library_functions.constructor.constructor.prototype.constructor=Function
-
     const {interfaces, shared}=__SINGLETON__
     if(plugin) {
       Object.assign(ctx, library_functions)
@@ -527,12 +532,13 @@ function buildOption(securityConfig) {
   }
   if(options.security.disableEval) {
     options.main.controllableGlobal.eval=_preventEval
-    global.eval=_preventEval
   }
   if(options.security.disableProcess) {
     options.main.controllableGlobal.process=_preventProcess
-    global.process=_preventProcess
   }
+  global.Function=options.main.controllableGlobal.Function
+  global.eval=_preventEval
+  global.process=_preventProcess
   return options
 }
 

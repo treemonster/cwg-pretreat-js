@@ -1,4 +1,19 @@
-exports.x=1
+exports.x=22
+
+function test(v, vv) {
+  console.log('-- test in require(): '+vv+' --')
+  console.log(v.constructor('return this')().eval+'')
+  console.log(v.constructor.prototype.constructor('return this')().eval+'')
+  console.log(v.constructor('return this')().utils)
+  console.log(v.constructor.prototype.constructor('return this')().utils)
+  console.log()
+}
+
+test(eval, 'eval')
+test(parseInt, 'parseInt')
+console.log('-- direct: ', Function('return this')())
+
+
 /*
 console.log(223, process)
 //console.log(setTimeout.constructor('return this')(), global)
