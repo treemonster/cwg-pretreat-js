@@ -112,7 +112,7 @@ function ini2input(p, activeSections, handle) {
             }
             return x
           }, '')
-          x[_key]=value
+          if(p.getOptionValueSource(_key)==='default') x[_key]=value
         }
       })
     }
