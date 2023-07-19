@@ -27,7 +27,6 @@ const {
   INIParser,
 }=utils
 
-
 class Yaf_Application{
   #config=null;
   #dispatcher=null;
@@ -39,10 +38,10 @@ class Yaf_Application{
     if(typeof config==='string') {
       const appconf=loadOrSetCache(
         Application.YAF_STORAGE.caches,
-        {filename: config, wrapper: (x, str)=>{
+        {filename: config, passTimeout: PASS_TIMEOUT, wrapper: (x, str)=>{
           return loadOrSetCache(
             Application.YAF_STORAGE.caches,
-            {filename: __dirname+'/yaf.default.ini'},
+            {filename: engineConfig.defaultINI, passTimeout: PASS_TIMEOUT},
           )+'\n\n'+str
         }},
         inidata=>{
@@ -68,18 +67,20 @@ class Yaf_Application{
             return o
           }, [])
 
-          tolower(ini.application.modules)
-          tolower(ini.application.dispatcher, [
-           'default_module',
-           'default_controller',
-           'default_action',
-           'default_route',
-          ])
-
-          if(ini.application.dispatcher.default_route) {
-            ini.application.dispatcher.default_route=ini.application.dispatcher.default_route.split('/').filter(a=>a)
+          const {
+            default_module,
+            default_controller,
+            default_action,
+            default_route,
+          }=ini.application.dispatcher
+          if(default_route) {
+            const _default_route=default_route.split('/').filter(a=>a)
+            const _def=[default_module, default_controller, default_action]
+            for(let i=_default_route.length; i<3; i++) {
+              _default_route[i]=_def[i]
+            }
+            ini.application.dispatcher.default_route=_default_route
           }
-
           const {application}=ini
           if(!application.directory) {
             throw new Error('`application.directory` must be specified')
@@ -392,7 +393,7 @@ class Yaf_Controller_Abstract{
     const yafConfig=Yaf_Application.app().getConfig().application
     const dispatcher=Yaf_Dispatcher.getInstance()
     let _path=yafConfig.directory+'/'
-    if(this.#_module!=='index') _path+='modules/'+this.#_module+'/'
+    if(this.#_module!=='index' && this.#_module!=='Index') _path+='modules/'+this.#_module+'/'
     _path+=('views/'+this.#_name+'/'+this.#_calling_action).toLowerCase()
     this.#_view=Yaf_Application.app().getDispatcher().initView(_path)
   }
@@ -493,7 +494,7 @@ class Yaf_Router{
         route.action=_ps[2]
       }
     }
-    return tolower(route, ['module', 'controller', 'action'])
+    return route
   }
   getRoute(name) {
     return this.#_routes.find(a=>a.key===name)
@@ -651,9 +652,6 @@ class Yaf_View_Interface{
 }
 
 class Yaf_Bootstrap_Abstract{
-  // you can write code like this:
-  // then they will be called at the begining
-  // async _initXX(dispatcher) {...}
 }
 
 
@@ -715,25 +713,28 @@ async function _call_controller_action(module, controller, action, invoke_args, 
   const yafConfig=Yaf_Application.app().getConfig().application
   module=yafConfig.modules.find(a=>a.toLowerCase()===module.toLowerCase())
   if(!module) return;
-  const controller_classname=(module+yafConfig.name_separator+controller).toLowerCase()+yafConfig.name_suffix
-  const controller_class_filename=get_autoload_callbacks().__autoload_classes(controller_classname)
+  const controller_classname=module+yafConfig.name_separator+controller+yafConfig.name_suffix
+  const _autoload=get_autoload_callbacks().__autoload_classes
+  const controller_class_filename=_autoload && _autoload(controller_classname)
   if(!existsFileSync(controller_class_filename)) return;
-  const controller_class=include_class_sync(controller_classname, controller_class_filename, true)
-
-  module=module.toLowerCase()
-  controller=controller.toLowerCase()
-  action=action.toLowerCase()
-
-  const v=new controller_class({module, controller, action}, invoke_args)
-  await v.init()
-  if(!_disabledView) {
-    v.initView()
-  }
+  const controller_class=this[controller_classname]
+  if(!controller_class) return;
+  const _custom_action=action.toLowerCase()+'action'
+  action=null
   for(let c of Object.getOwnPropertyNames(controller_class.prototype)) {
-    if(c.toLowerCase()===action+'action') {
-      return [v, await v[c]()]
-    }
+    if(c.toLowerCase()!==_custom_action) continue
+    action=c
+    break
   }
+  if(!action) return;
+  const v=new controller_class({
+    module,
+    controller: end_cut(controller_class.name, yafConfig.name_suffix),
+    action: end_cut(action, 'Action'),
+  }, invoke_args)
+  await v.init()
+  if(!_disabledView) v.initView()
+  return [v, await v[action]()]
 }
 async function call_controller_action_only(...argv) {
   return await _call_controller_action(...argv)
@@ -743,6 +744,5 @@ async function call_controller_action(...argv) {
   if(p) return p
   const call_argv=Yaf_Application.app().getConfig().application.dispatcher.default_route
   if(!call_argv) return;
-  for(;call_argv.length<3;) call_argv.push('index')
   return await _call_controller_action(...call_argv, ...argv.slice(3))
 }

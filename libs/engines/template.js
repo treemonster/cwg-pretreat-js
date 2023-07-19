@@ -2,15 +2,18 @@
 
 const path=require('path')
 const vm=require('vm')
-const {defer, sleep, loadOrSetCache, getTimeRecorder}=require('../utils/base')
+const utils=require('../utils/base')
+const {defer, sleep, loadOrSetCache, getTimeRecorder, merge}=utils
 
 
-const FLAG_OPEN='<?js'
-const FLAG_CLOSE='?>'
 let _t=0
 const T_JS=_t++
 const T_TEXT=_t++
-function lexer(content) {
+function lexer(content, option) {
+  const {
+    FLAG_OPEN,
+    FLAG_CLOSE,
+  }=option.Tokens
   const tokens=[]
   const _t_flags=[]
   let c1=-1, c2=-1
@@ -70,31 +73,16 @@ function transformToAst(tokens, filename, isSyncMode) {
   const hardCodedStr=Object.keys(hardCoded).map(k=>`const ${k}=${JSON.stringify(hardCoded[k])};`).join('\n')
   const code=isSyncMode? `
   ; (_=>{
-    try{
-      (_=>{
-        const __INVISIBLE__=null
-        ${hardCodedStr}
-        ${ret}
-      })()
-      __INVISIBLE__.doneSync(null)
-    }catch(e) {
-      __INVISIBLE__.doneSync(e)
-    }
+    ${hardCodedStr}
+    ${ret}
   })()
   `:`
   ; (async _=>{
-    try{
-      await (async _=>{
-        const __INVISIBLE__=null
-        ${hardCodedStr}
-        ${ret}
-      })()
-      __INVISIBLE__.done(null)
-    }catch(e) {
-      __INVISIBLE__.done(e)
-    }
+    ${hardCodedStr}
+    ${ret}
   })()
   `
+
   return new vm.Script(code, filename)
 }
 
@@ -123,13 +111,6 @@ function getControllableGlobal() {
 
     eval: __UNSAFE__.eval,
 
-    // The `Function` is a dangerous object because it plays a special role in Javascript.
-    // It is the ancestor of all the Javascript objects.
-    // In other words, all variables can get the `Function` object by traversing their prototype chains.
-    // We can use the `Function` as a constructor to execute some custom code strings, and the scope of them is the global context.
-    // That is why we have to provide a controllable `Function` object instead of the default one.
-    Function: Function.prototype.constructor,
-
     TextDecoder,
     TextEncoder,
     URL,
@@ -151,6 +132,8 @@ function getControllableGlobal() {
     Map, WeakMap,
     Proxy,
     Symbol,
+    Error,
+    Function,
 
     escape, unescape,
     encodeURI, decodeURI,
@@ -161,42 +144,11 @@ function getControllableGlobal() {
   }
 }
 
-function getPrevented(x, isFunc) {
-  if(isFunc) return _=>{
-    throw new Error(`The ${x} function has been disabled by the policy`)
-  }
-  return new Error(`The ${x} object has been disabled by the policy`)
-}
-
-const _preventEval=getPrevented('eval', 1)
-const _preventRequire=getPrevented('require', 1)
-const _preventProcess=getPrevented('process', 0)
-const _preventUtils=getPrevented('utils', 0)
-
-// Prevent access to global variables through Function's prototype chain
-; (_=>{
-  const v=new vm.Script(`
-    func.constructor.prototype.constructor=(_=>{}).constructor
-    for(let k in self) {
-      if(k==='self') continue
-      delete self[k]
-    }
-    delete self.self
-  `)
-  const ctx={
-    func: _=>{},
-    eval: _preventEval,
-    global: {},
-  }
-  ctx.self=ctx
-  v.runInNewContext(ctx)
-})()
-
 
 /**
  The `getRequireCallable` function provides a secure method for using custom modules, and limits the use of core modules.
  */
-function getRequireCallable(caches, filename, controllableGlobal, security) {
+function getRequireCallable(filename) {
   function _require_callable(x) {
     // `null` means the target is a core module provided by the nodejs runtime
     if(require.resolve.paths(x)===null) {
@@ -217,47 +169,25 @@ function getRequireCallable(caches, filename, controllableGlobal, security) {
 
 
 /**
- there are three special variables in the context object:
- 1. __INVISIBLE__: provides some functions that are used by the engine's main thread
- 2. __SINGLETON__: provides some functions that can be shared across different contexts
+ The __SINGLETON__ is a special type of variable.
+ It provides some functions that can be shared across different contexts
  */
-function getNewContext(caches, filename, globals, options) {
+function getNewContext(option, filename, globals) {
 
-  const {main, security}=options
+  const {cache, controllableGlobal}=option
 
-  const _outputCompleted=defer()
+  if(!option.__SINGLETON__) {
+    option.__SINGLETON__={
 
-  if(!main.__SINGLETON__) {
-    main.__SINGLETON__={
+      contexts: [],
 
       // properties written in `interfaces` are shared during the request threading
       interfaces: {
-        securityConfig: JSON.parse(JSON.stringify(options.security)),
-        eval: x=>main.controllableGlobal.eval(x),
+
+        eval: x=>controllableGlobal.eval(x),
         time_recorder: getTimeRecorder(),
         echo: (...argv)=>{
-          (__SINGLETON__.shared.ob.opened?
-            __SINGLETON__.shared.ob.output:
-            __SINGLETON__.shared.output
-          ).push(...argv)
-        },
-        ob_open: _=>{
-          if(__SINGLETON__.shared.ob.opened) {
-            throw new Error('ob_open() cannot been called when it has already opened')
-          }
-          __SINGLETON__.shared.ob.opened=true
-          __SINGLETON__.shared.ob.output=['']
-        },
-        ob_close: _=>{
-          if(!__SINGLETON__.shared.ob.opened) {
-            throw new Error('you must call ob_open() before calling ob_close()')
-          }
-          __SINGLETON__.shared.ob.opened=false
-        },
-        ob_get_string: async _=>{
-          const v=Promise.all(__SINGLETON__.shared.ob.output)
-          __SINGLETON__.shared.ob.output=['']
-          return (await v).join('')
+          __SINGLETON__.shared.output.push(...argv)
         },
 
         __autoload_classes: func=>{
@@ -278,10 +208,6 @@ function getNewContext(caches, filename, globals, options) {
       // shared properties do not need to display for users
       shared: {
         output: [''],
-        ob: {
-          opened: false,
-          output: [''],
-        },
 
         // `modules` includes library functions and declared classes.
         // Their compilers will be called in sync mode, which is different from other executable files.
@@ -301,7 +227,7 @@ function getNewContext(caches, filename, globals, options) {
 
     }
   }
-  const __SINGLETON__=main.__SINGLETON__
+  const {__SINGLETON__}=option
   const exports=obj=>{
     for(let k in obj) {
       if(ctx[k]) {
@@ -310,14 +236,14 @@ function getNewContext(caches, filename, globals, options) {
       ctx[k]=obj[k]
     }
   }
+
   const include_file=async (inc_filename, private_datas)=>{
     const _filename=path.resolve(filename+'/..', inc_filename)
     const {output, exports: _exports}=await prehandleFileAsync(
-      caches,
-      {filename: _filename, wrapper: null},
+      option,
+      {filename: _filename, wrapper: null, passTimeout: option.PASS_TIMEOUT},
       Object.assign({}, private_datas, globals),
       null,
-      options,
     )
     return _exports
   }
@@ -329,11 +255,10 @@ function getNewContext(caches, filename, globals, options) {
   const _include_file_sync=(inc_filename, private_datas, wrapper)=>{
     const _filename=path.resolve(filename+'/..', inc_filename)
     const {exports: _exports}=prehandleFileSync(
-      caches,
-      {filename: _filename, wrapper},
+      option,
+      {filename: _filename, wrapper, passTimeout: option.PASS_TIMEOUT},
       Object.assign({}, private_datas, globals),
       null,
-      options,
     )
     return _exports
   }
@@ -385,40 +310,25 @@ function getNewContext(caches, filename, globals, options) {
     include_class_sync,
     defer,
     sleep,
-    require: security.disableRequire?
-      _preventRequire:
-      getRequireCallable(caches, filename, main.controllableGlobal, security),
-    utils: security.disableUtils? _preventUtils: require('../utils/base'),
+    utils,
+    require: getRequireCallable(filename),
   }
   Object.assign(ctx, globals, __SINGLETON__.interfaces)
-  ctx.__INVISIBLE__={
-    getOutput: async _=>{
-      await _outputCompleted.promise
-      const op=await Promise.all(__SINGLETON__.shared.output)
-      return op.join('')
-    },
-    done: e=>{
-      if(e) {
-        _outputCompleted.reject(e)
-      }else{
-        _outputCompleted.resolve()
-      }
-    },
-    doneSync: e=>{
-      ctx.__INVISIBLE__.done(e)
-      if(e) throw e
-    },
-  }
-  ctx.global=Object.assign({}, ctx, main.controllableGlobal, {__INVISIBLE__: null})
+  Object.assign(ctx, controllableGlobal)
+  ctx.globalThis=ctx
+  ctx.global=controllableGlobal
+  __SINGLETON__.contexts.push(ctx)
   return ctx
 }
-async function executeVM(ctx, vm) {
-  vm.runInNewContext(ctx)
-  const output=await ctx.__INVISIBLE__.getOutput()
-  return output
-}
+
 function executeVMSync(ctx, vm) {
-  vm.runInNewContext(ctx)
+  return vm.runInNewContext(ctx)
+}
+async function executeVM(ctx, vm, __SINGLETON__) {
+  await executeVMSync(ctx, vm)
+  if(!__SINGLETON__) return;
+  const output=await Promise.all(__SINGLETON__.shared.output)
+  return output.join('')
 }
 
 function getValue(...a) {
@@ -427,18 +337,14 @@ function getValue(...a) {
   }
 }
 
-function _prehandleFile(syncMode, caches, {filename, mockFileContent, wrapper}, globals, emitters, options={
-  main, security,
-}) {
-  const {main, security}=options
-  if(!main || !security) throw new Error('The required parameter is missing.')
+function _prehandleFile(syncMode, option, {filename, mockFileContent, wrapper, passTimeout}, globals, emitters) {
 
   const {
     beforeExecuteSync, // change attribues of the context
   }=emitters || {}
 
-  const [astvm, get_clean_exports]=loadOrSetCache(caches, {filename, mockFileContent, wrapper}, fileContent=>{
-    const ctx=getNewContext(caches, filename, {}, options)
+  const [astvm, get_clean_exports]=loadOrSetCache(option.cache, {filename, mockFileContent, wrapper, passTimeout}, fileContent=>{
+    const ctx=getNewContext(option, filename, {})
     let _filters=new Set(Object.keys(ctx))
     function get_clean_exports(ctx) {
       let _ctx={}
@@ -448,15 +354,15 @@ function _prehandleFile(syncMode, caches, {filename, mockFileContent, wrapper}, 
       }
       return _ctx
     }
-    const tokens=lexer(fileContent)
+    const tokens=lexer(fileContent, option)
     const astvm=transformToAst(tokens, filename, syncMode)
     return [astvm, get_clean_exports]
   })
-  let ctx=getNewContext(caches, filename, globals, options)
+  let ctx=getNewContext(option, filename, globals)
   const {
     __SINGLETON__,
     controllableGlobal,
-  }=main
+  }=option
   let pctx=new Proxy(ctx, {
     get: (target, prop, receiver)=>{
       const _old=getValue(target[prop], controllableGlobal[prop], __SINGLETON__.interfaces[prop])
@@ -489,15 +395,16 @@ function _prehandleFile(syncMode, caches, {filename, mockFileContent, wrapper}, 
   return {
     pctx,
     astvm,
-    get_clean_exports
+    get_clean_exports,
+    __SINGLETON__,
   }
 
 }
 
 
 async function prehandleFileAsync(...argv) {
-  const {pctx, astvm, get_clean_exports}=_prehandleFile(false, ...argv)
-  const output=await executeVM(pctx, astvm)
+  const {pctx, astvm, get_clean_exports, __SINGLETON__}=_prehandleFile(false, ...argv)
+  const output=await executeVM(pctx, astvm, __SINGLETON__)
   return {
     output,
     exports: get_clean_exports(pctx),
@@ -515,40 +422,37 @@ function prehandleFileSync(...argv) {
   }
 }
 
-
-function buildOption(securityConfig) {
-  securityConfig=securityConfig || {}
-  const options={
-    main: {
-      __SINGLETON__: null,
-      controllableGlobal: getControllableGlobal(),
-    },
-    security: {
-      disableEval: securityConfig.disableEval || false,
-      disableRequire: securityConfig.disableRequire || false,
-      disableProcess: securityConfig.disableProcess || false,
-      disableUtils: securityConfig.disableUtils || false,
-    },
-  }
-  if(options.security.disableEval) {
-    options.main.controllableGlobal.eval=_preventEval
-  }
-  if(options.security.disableProcess) {
-    options.main.controllableGlobal.process=_preventProcess
-  }
-  global.Function=options.main.controllableGlobal.Function
-  global.eval=_preventEval
-  global.process=_preventProcess
-  return options
+const defaultOption={
+  tokens: {
+    FLAG_OPEN: '<?js',
+    FLAG_CLOSE: '?>',
+  },
 }
+function getParser(customOption={}) {
+  const option=merge(defaultOption, customOption)
+  const cache={}
+  const controllableGlobal=getControllableGlobal()
+  const Tokens=option.tokens
 
+  // 此处需要解决：
+  // 1. 插件只vm编译一次
+  // 2. 运行多次
 
-const caches={}
-module.exports={
-  prehandleFileAsync: (file, globals, emitters, securityConfig)=>{
+  return (file, globals, emitters)=>{
     if(typeof file==='string') {
       file={filename: file}
     }
-    return prehandleFileAsync(caches, file, globals, emitters, buildOption(securityConfig))
-  },
+    const option={
+      Tokens,
+      cache,
+      controllableGlobal,
+      __SINGLETON__: null,
+      PASS_TIMEOUT: file.passTimeout || -1,
+    }
+    return prehandleFileAsync(option, file, globals, emitters)
+  }
+}
+
+module.exports={
+  prehandleFileAsync: getParser(),
 }

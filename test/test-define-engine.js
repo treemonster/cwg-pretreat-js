@@ -1,9 +1,15 @@
-const {parsePredeclare, prehandleFileSync}=require(__dirname+'/../libs/engines/define')
+const {getParser}=require(__dirname+'/../libs/engines/define')
+const parse=getParser({
+  tokens: {
+    T_CALL_DEFINE: '@',
+  },
+  enableSpacesIndent: true,
+})
+
 function test(fn, predeclare='') {
   console.log('-'.repeat(32))
   console.log({fn, predeclare})
-  const predeclareCtx=parsePredeclare(predeclare)
-  console.log(prehandleFileSync(__dirname+'/test-define-engine/'+fn, predeclareCtx, true))
+  console.log(parse(__dirname+'/test-define-engine/'+fn, predeclare))
   console.log('-'.repeat(32))
   console.log('\n\n\n')
 }

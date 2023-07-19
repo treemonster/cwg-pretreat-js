@@ -1,28 +1,42 @@
 const path=require('path')
 const vm=require('vm')
-const {loadOrSetCache, getTimeRecorder}=require('../utils/base')
-
-const T_IFDEF='#ifdef'
-const T_ELSE='#else'
-const T_ENDIF='#endif'
-const T_IFNDEF='#ifndef'
-
-const T_DEF='#def'
-const T_UNDEF='#undef'
-
-const T_INCLUDE='#include'
-
-const T_DEFINE='#define'
-const T_CALL_DEFINE='@'
+const {loadOrSetCache, merge}=require('../utils/base')
 
 
-function lexer(content, enableSpacesIndent) {
+function lexer(content, option) {
+  const {
+    enableSpacesIndent,
+    tokens: Tokens,
+  }=option
+  const {
+    T_IFDEF,
+    T_ELSE,
+    T_ENDIF,
+    T_IFNDEF,
+
+    T_DEF,
+    T_UNDEF,
+
+    T_INCLUDE,
+
+    T_DEFINE,
+    T_CALL_DEFINE,
+  }=Tokens
+
   const tokens=[]
   const lines=content.split('\n')
-  let reStr=(new RegExp(/(#(?:ifdef|else|endif|ifndef|def|undef|include|define)\b)((?:\s+).+)?|(.+)/)).toString()
-  reStr=reStr.substr(1, reStr.length-2)
+  let reStr='((?:'+[
+    T_IFDEF, 
+    T_ELSE, 
+    T_ENDIF, 
+    T_IFNDEF, 
+    T_DEF, 
+    T_UNDEF, 
+    T_INCLUDE,
+    T_DEFINE,
+  ].join('|')+')\\b)((?:\\s+).+)?|(.+)'
   const re=new RegExp((enableSpacesIndent? '^\\s*': '^')+reStr, 'g')
-  const subre=/@([A-Za-z\d_]+)(\([^)]*?\)|\b)|(.)/g
+  const subre=new RegExp(T_CALL_DEFINE+'([A-Za-z\\d_]+)(\\([^)]*?\\)|\\b)|(.)', 'g')
 
   for(let i=0; i<lines.length; i++) {
     if(!lines[i]) {
@@ -62,7 +76,26 @@ const O_DEF=++_o
 const O_INCLUDE=++_o
 const O_UNDEF=++_o
 
-function transformToAst(tokens) {
+function transformToAst(tokens, option) {
+
+  const {
+    tokens: Tokens,
+  }=option
+  const {
+    T_IFDEF,
+    T_ELSE,
+    T_ENDIF,
+    T_IFNDEF,
+
+    T_DEF,
+    T_UNDEF,
+
+    T_INCLUDE,
+
+    T_DEFINE,
+    T_CALL_DEFINE,
+  }=Tokens
+
   const tree=[]
   const if_stacks=[]
   function _get_if_stack() {
@@ -172,6 +205,21 @@ function transformToAst(tokens) {
   return tree
 }
 
+function newContext({option, caches, filename, parent}) {
+  const ctx=Object.assign({}, parent || {
+    defs: new Set,
+    defines: {},
+    filename: filename || '',
+    option,
+    caches,
+  })
+  if(filename) {
+    ctx.filename=filename
+  }
+  return ctx
+}
+
+
 function execute(ctx, ast) {
   let ret=''
   for(let i=0; i<ast.length; i++) {
@@ -199,63 +247,79 @@ function execute(ctx, ast) {
     }else if(p.type===O_UNDEF) {
       ctx.defs.delete(p.def)
     }else if(p.type===O_INCLUDE) {
-      const {caches, enableSpacesIndent}=ctx
       const filename=path.resolve(ctx.filename+'/..', p.include)
-      const predeclare=ctx
-      ret+=prehandleFileSync(caches, filename, predeclare, enableSpacesIndent)
+      const nctx=newContext({filename, parent: ctx})
+      ret+=executeContext(nctx)
     }else{
       throw new Error('unsupported node: '+JSON.stringify(p))
     }
   }
   return ret
 }
-
-function executeContent(ctx, content, parseOnly) {
-  const tokens=lexer(content, ctx? ctx.enableSpacesIndent: false)
-  const ast=transformToAst(tokens)
-  if(parseOnly) return ast
+function executeContent(ctx, content) {
+  const tokens=lexer(content, ctx.option)
+  const ast=transformToAst(tokens, ctx.option)
   return execute(ctx, ast)
 }
-
-function newContext(filename) {
-  return {
-    defs: new Set,
-    defines: {},
-    filename: filename || '',
-    enableSpacesIndent: false,
-  }
-}
-
-function prehandleFileSync(caches, filename, predeclare, enableSpacesIndent) {
-  // const time_recorder=getTimeRecorder()
-  const ast=loadOrSetCache(caches, {filename}, fileContent=>{
-    return executeContent({enableSpacesIndent}, fileContent, true)
+function executeContext(ctx) {
+  const {caches, filename}=ctx
+  return loadOrSetCache(caches, {filename}, fileContent=>{
+    return executeContent(ctx, fileContent)
   })
-  const ctx=typeof predeclare==='string'?
-    (ctx=>(
-      executeContent(ctx, predeclare, false), ctx
-    ))(newContext(filename)):
-    Object.assign(predeclare, {filename})
-  /*
-  if(!ctx.defines['COST']) {
-    ctx.defines['COST']=_=>time_recorder.cost()
+}
+
+
+const defaultOption={
+  tokens: {
+    T_IFDEF: '#ifdef',
+    T_ELSE: '#else',
+    T_ENDIF: '#endif',
+    T_IFNDEF: '#ifndef',
+
+    T_DEF: '#def',
+    T_UNDEF: '#undef',
+
+    T_INCLUDE: '#include',
+
+    T_DEFINE: '#define',
+    T_CALL_DEFINE: '@',
+  },
+  enableSpacesIndent: false,
+}
+
+function getParser(customOption) {
+  const caches={}
+  const option=merge(defaultOption, customOption)
+  return (entryFilename, predeclare)=>{
+    const ctx=newContext({
+      filename: entryFilename,
+      option,
+      caches,
+    })
+    if(predeclare) {
+      if(predeclare+''===predeclare) {
+        predeclare={
+          type: 'content',
+          str: predeclare,
+        }
+      }
+      const {type, str}=predeclare
+      if(type==='content') {
+        executeContent(ctx, str)
+      }else if(type==='filename') {
+        const pctx=newContext({filename: str, parent: ctx})
+        executeContext(pctx)
+      }else{
+        throw new Error('unexcepted type of predeclare: '+type)
+      }
+    }
+    return executeContext(ctx)
   }
-  */
-  ctx.enableSpacesIndent=enableSpacesIndent
-  ctx.caches=caches
-  return execute(ctx, ast)
 }
 
 module.exports={
-  prehandleFileSync: (caches=>{
-    return (filename, predeclare, enableSpacesIndent)=>{
-      return prehandleFileSync(caches, filename, predeclare, enableSpacesIndent)
-    }
-  })({}),
-  parsePredeclare: (predeclare, enableSpacesIndent)=>{
-    const ctx=newContext()
-    ctx.enableSpacesIndent=enableSpacesIndent
-    executeContent(ctx, predeclare, false)
-    return ctx
+  prehandleFileSync: (filename, predeclare, option)=>{
+    const parse=getParser(option)
+    return parse(filename, predeclare)
   },
 }

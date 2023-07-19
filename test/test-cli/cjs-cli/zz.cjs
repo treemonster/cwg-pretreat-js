@@ -1,20 +1,25 @@
 <?js
 
+console.log(process.pid)
+
 function test(v, vv) {
 	console.log('-- test: '+vv+' --')
   console.log(v.constructor('return this')().eval+'')
   console.log(v.constructor.prototype.constructor('return this')().eval+'')
+	console.log(v.constructor('return this')().eval('FF=2345'))
   console.log(v.constructor('return this')().utils)
   console.log(v.constructor.prototype.constructor('return this')().utils)
   console.log()
 }
 test(parseRange, 'parseRange')
 test(echo, 'echo')
+return;
 test(curl, 'curl')
 test(parseInt, 'parseInt')
 console.log('-- direct: ', Function('return this')())
+// setTimeout('console.log("-- in settimeout", global, this)')
 
-echo(19191)
+echo(19192)
 // console.log(Object.keys(require.cache))
 delete require.cache[require('path').resolve(__dirname+'/xxa.js')]
 console.log(require('./xxa').x)

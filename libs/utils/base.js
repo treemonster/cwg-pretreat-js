@@ -26,21 +26,28 @@ function isPackageFile(_access_file) {
   return _access_file.indexOf(PACKAGE_DIR)===0
 }
 
-function loadOrSetCache(caches, {filename, mockFileContent, wrapper}, buildOpcodeFunc) {
+function loadOrSetCache(caches, {filename, mockFileContent, wrapper, passTimeout}, buildOpcodeFunc) {
   if(!buildOpcodeFunc) buildOpcodeFunc=x=>x
+  if(passTimeout===undefined) passTimeout=-1
   const wrapperKey=wrapper? (wrapper._key=wrapper._key || wrapper.toString()): '\n'
-  const [lastModifiedKey, cache_filename, readContentSync]=(_=>{
-    if(mockFileContent) {
-      const lastModifiedKey=md5(mockFileContent)+md5(wrapperKey)
-      const cache_filename='mockFileContent://'+filename
-      return [lastModifiedKey, cache_filename, _=>mockFileContent]
-    }else{
-      const {lastModifiedKey, readContentSync}=getTextFile(filename)
-      return [lastModifiedKey+':'+md5(wrapperKey), filename, readContentSync]
-    }
-  })()
+  if(!filename) throw new Error(`The filename is a required field`)
+  const cache_filename=mockFileContent? `mockFileContent://${filename}`: filename
   caches[cache_filename]=caches[cache_filename] || {}
   const fileCache=caches[cache_filename]
+  const _t=Date.now()
+  if(fileCache.lastUpdate+passTimeout>_t && fileCache.opcode) {
+    return fileCache.opcode
+  }
+  fileCache.lastUpdate=_t
+  const [lastModifiedKey, readContentSync]=(_=>{
+    if(mockFileContent) {
+      const lastModifiedKey=md5(mockFileContent)+md5(wrapperKey)
+      return [lastModifiedKey, _=>mockFileContent]
+    }else{
+      const {lastModifiedKey, readContentSync}=getTextFile(filename)
+      return [lastModifiedKey+':'+md5(wrapperKey), readContentSync]
+    }
+  })()
   if(fileCache.lastModifiedKey===lastModifiedKey && fileCache.opcode) {
     return fileCache.opcode
   }
@@ -192,6 +199,21 @@ function sleep(t) {
   return p
 }
 
+function merge(ref, custom) {
+  if(typeof ref==='object' && ref) {
+    for(let k in ref) {
+      ref[k]=merge(ref[k], custom && custom[k])
+    }
+  }else if(Array.isArray(ref)) {
+    for(let i=0; i<ref.length; i++) {
+      ref[i]=merge(ref[i], custom && custom[i])
+    }
+  }else if(custom!==undefined) {
+    ref=custom
+  }
+  return ref
+}
+
 const {
   INIParser,
   parseINIValue,
@@ -214,4 +236,5 @@ module.exports={
   INIParser,
   parseINIValue,
   filename2INIContext,
+  merge,
 }

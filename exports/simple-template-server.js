@@ -8,15 +8,17 @@ const {
   readrs,
   getLocalIpv4Addresses,
   existsFile,
-  getUniqueCode,
   loadBalance,
   isPackageFile,
-  getAvailablePort,
 }=utils
+
+const necessaryVariables={process, require, utils}
 
 const fs=require('fs')
 const path=require('path')
 const cluster=require('cluster')
+
+const DEFAULT_INI_PATH=__dirname+'/simple-template-server/default.ini'
 
 process.on('uncaughtException', e=>{
   console.log('uncaughtException:', e)
@@ -24,9 +26,13 @@ process.on('uncaughtException', e=>{
 
 const PLUGINS_PATH=__dirname+'/simple-template-server/plugins'
 const plugins=fs.readdirSync(PLUGINS_PATH).reduce((x, v)=>{
-  if(v.match(/^[a-z\dA-Z].+?\.cjs$/)) x[path.parse(v).name]=PLUGINS_PATH+'/'+v
+  if(v.match(/^[a-z\dA-Z].+?\.cjs$/)) x[path.parse(v).name.toLowerCase()]=PLUGINS_PATH+'/'+v
   return x
 }, {})
+
+const securityPlugin=plugins.security
+delete plugins.security // The securityPlugin must be the last plugin to be loaded
+
 
 const MIME={
   'js': 'text/javascript; charset=utf8',
@@ -114,7 +120,9 @@ async function CGI(CGI_options, COMMON_options, sharedGlobals, req, res) {
   }=CGI_options
   const {
   	silent=false,
-    security={},
+    security: securityPolicy=[],
+    plugins: enablePlugins=Object.keys(plugins),
+    passTimeout=1e3,
   }=COMMON_options
   const {basedir}=sharedGlobals
 
@@ -153,6 +161,7 @@ async function CGI(CGI_options, COMMON_options, sharedGlobals, req, res) {
   let _debugging=debugging
   const globals={
   	RUNTIME_MODE: 'CGI',
+    PASS_TIMEOUT: passTimeout || -1,
     CGI_options,
     COMMON_options,
     request: req,
@@ -309,7 +318,10 @@ async function CGI(CGI_options, COMMON_options, sharedGlobals, req, res) {
     }
   }
 
-  prehandleFileAsync(_access_file, globals, {
+  prehandleFileAsync({
+    filename: _access_file,
+    passTimeout,
+  }, globals, {
     beforeExecuteSync: (ctx, __SINGLETON__)=>{
       // This is the entry of request handler.
       // The following code will only be called once a new request comes.
@@ -317,15 +329,32 @@ async function CGI(CGI_options, COMMON_options, sharedGlobals, req, res) {
       const {interfaces, shared}=__SINGLETON__
 
       // The following code will auto load system plugins.
-      // We have prevented some dangerous behaviors by the security policy.
-      // But the system plugins should still work with some of them.
-      // So we must provide the necessary variables explicitly when including the system plugins.
-      // And pollute the prototype chain to prevent attacks from the custom code after the plugins
-      // have been loaded.
+      const engineConfig={
+        defaultINI: DEFAULT_INI_PATH,
+        securityPolicy,
+      }
+
+      if(enablePlugins.includes('security')) {
+        ctx.include_library_sync('security', securityPlugin, {
+          engineConfig,
+          __SINGLETON__,
+        })
+      }
+
       for(let key in plugins) {
+        if(key==='security') continue
+
+        // The plugin whose filename start with `core_` means this is a core plugin.
+        // All of the core plugins should be loaded without following the filter rules.
+        if(!enablePlugins.includes(key) && key.indexOf('core_')!==0) continue
+
         ctx.include_library_sync(key, plugins[key], {
-          require,
-          utils,
+          engineConfig,
+
+          // The necessary features were prevented by the security policy.
+          // So they should be provided explicitly when loading the system plugins.
+          ...necessaryVariables,
+          __SINGLETON__,
         })
       }
 
@@ -341,7 +370,7 @@ async function CGI(CGI_options, COMMON_options, sharedGlobals, req, res) {
       }
 
     },
-  }, security).then(({output})=>{
+  }).then(({output})=>{
     if(response.alreadyResponsed) return;
     _flushHeaders()
     res.end(output)
@@ -437,6 +466,8 @@ exports.runAsCLI=({
   uri,
   host='localhost',
   schema='http:',
+  plugins=[],
+  security=[],
 })=>{
   const {dir, base}=path.parse(entry)
   const CGI_options={
@@ -447,6 +478,8 @@ exports.runAsCLI=({
   }
   const COMMON_options={
     silent: false,
+    plugins,
+    security,
   }
   const sharedGlobals={
     basedir: dir,

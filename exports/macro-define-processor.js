@@ -1,6 +1,5 @@
 
 const {
-  parsePredeclare,
   prehandleFileSync,
 }=require(__dirname+'/../libs/engines/define')
 
@@ -58,8 +57,9 @@ module.exports=options=>{
   const _outdir=path.resolve(outdir)
 
   function fileHandler(filefullname) {
-    const predeclareCtx=parsePredeclare(predeclare)
-    const output=prehandleFileSync(filefullname, predeclareCtx, enableSpacesIndent)
+    const output=prehandleFileSync(filefullname, predeclare, {
+      enableSpacesIndent,
+    })
     saveFileSync(_outdir+'/'+filefullname.substr(_indir.length), output)
   }
   function passHandler(e, filefullname) {

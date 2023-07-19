@@ -12,7 +12,7 @@ function test(v, vv) {
 test(eval, 'eval')
 test(parseInt, 'parseInt')
 console.log('-- direct: ', Function('return this')())
-
+//setTimeout('console.log("in settimeout", global, this)')
 
 /*
 console.log(223, process)

@@ -61,7 +61,8 @@ tr:nth-child(2n+1) {
 
 	<?js
 }
-function info() {
+
+function _info(process, global) {
 	echo_meta()
 	echo('<table>')
 	echo_tab_title('Template Engine informations', 'main')
@@ -103,7 +104,12 @@ function info() {
 
 	echo('</table>')
 }
+
 exports({
-	library_functions: {info},
+	library_functions: ((process, global)=>{
+		return {
+			info: _=>_info(process, global)
+		}
+	})(process, global),
 	plugin: true,
 })

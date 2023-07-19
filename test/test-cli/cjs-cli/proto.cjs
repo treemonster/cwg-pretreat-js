@@ -1,0 +1,2 @@
+<?js
+require('./pro1')

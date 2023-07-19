@@ -8,6 +8,12 @@ const T_QUOTE2="'"
 const T_VAR=Symbol()
 
 function parseINIValue(rawValue, ctx) {
+  if(['boolean', 'number'].includes(typeof rawValue)) {
+    return {
+      value: rawValue,
+      comment: '',
+    }
+  }
   const tokens=[]
   const typeStack=[]
   for(let i=0; i<rawValue.length; i++) {

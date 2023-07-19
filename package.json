@@ -1,6 +1,6 @@
 {
   "name": "cwg-pretreat-js",
-  "version": "3.3.5",
+  "version": "3.4.6",
   "engines": {
     "node": ">=12"
   },
@@ -26,7 +26,6 @@
     "test:cli": "bash test/test-cli.sh"
   },
   "dependencies": {
-    "commander": "^10.0.1",
-    "react": "^18.2.0"
+    "commander": "^10.0.1"
   }
 }

@@ -2,6 +2,8 @@
 
 const {Command}=require('commander')
 const program=new Command()
+const path=require('path')
+const fs=require('fs')
 
 program
   .name('cjs')
@@ -20,11 +22,19 @@ function cjs_macro() {
     .option('-m, --include-matches <string>', 'Include files, given as a pattern')
     .option('-x, --exclude-matches <string>', 'Exclude files, given as a pattern')
     .action(({definesFile, enableSpacesIndent, testFile, inDir, outDir, includeMatches, excludeMatches}) => {
-      const {prehandleFileSync}=require('./libs/engines/define')
-      const predeclare=require('fs').readFileSync(definesFile, 'utf8')
+      const {
+        prehandleFileSync,
+      }=require(__dirname+'/libs/engines/define')
+
+      const predeclare={
+        type: 'filename',
+        str: definesFile,
+      }
 
       if(testFile) {
-        const result=prehandleFileSync(testFile, predeclare, enableSpacesIndent)
+        const result=prehandleFileSync(testFile, predeclare, {
+          enableSpacesIndent,
+        })
         console.log(result)
         return
       }
@@ -44,36 +54,55 @@ function cjs_macro() {
 
 }
 
-function cjs_server() {
-  const p=program
-    .command('server')
-    .description('Start a local server')
-    .option('-c --config <string>', 'Specifiy the configuration file')
+
+
+function ini2input(p, activeSections, handle) {
+  p.option('-c --config <string>', 'Specifiy the configuration file')
   const {INIParser, parseINIValue, filename2INIContext}=require(__dirname+'/libs/utils/base')
-  const fs=require('fs')
-  const default_ini=__dirname+'/cjs-server.ini'
+  const default_ini=__dirname+'/exports/simple-template-server/default.ini'
   const {comments, groups, ini, ctx}=INIParser({
     filename: default_ini,
-    activeAllSections: ['server'],
+    activeSections,
     onValue: ({keychain, comment, rawValue})=>{
-      p.option('--'+keychain.join('-')+' <string>', comment, rawValue)
+      let options={
+        call: 'option',
+        short: '',
+      }
+
+      if(+rawValue+''===rawValue) {
+        options.xtype='<number>'
+        options.defaultValue=+rawValue
+      }else if(rawValue.match(/^(on|off|yes|no|true|false)$/i)){
+        options.xtype='<boolean>'
+        options.defaultValue=rawValue.match(/^(on|yes|true)$/i)? true: false
+      }else{
+        options.xtype='<string>'
+        options.defaultValue=rawValue
+      }
+
+      const _comment=comment.replace(/<(?:(required)|(?:short:\s*(.+?))|(noargv))>\s+/g, (_, required, short, noargv)=>{
+        if(required) options.call='requiredOption'
+        if(short) options.short=short+' '
+        if(noargv) options.xtype=''
+        return ''
+      })
+
+      const arg=[options.short+'--'+keychain.join('-')+(options.xtype? ' '+options.xtype: ''), _comment]
+      if(options.call==='option') arg.push(options.defaultValue)
+      p[options.call](...arg)
     },
   })
+
   p.action(x=>{
     for(let v in x) {
       x[v]=parseINIValue(x[v], ctx).value
     }
-
-    const {server}=require('./exports/simple-template-server')
-    const parse_multi_value=x=>x.split(',').map(a=>a.trim()).filter(a=>a)
-    const path=require('path')
-
     if(x.config) {
       const fn=path.resolve(x.config)
       INIParser({
         filename: fn,
         mockFileContent: fs.readFileSync(default_ini, 'utf8')+'\n\n'+fs.readFileSync(fn, 'utf8'),
-        activeSections: ['cjs'],
+        activeSections,
         onValue: ({keychain, value})=>{
           const _key=keychain.reduce((x, y, i)=>{
             if(i) {
@@ -88,25 +117,45 @@ function cjs_server() {
       })
     }
 
+    handle(x, p=>{
+      const o=[]
+      for(let k in x) {
+        if(k.indexOf(p)>-1 && x[k]===true) {
+          o.push(k.substr(p.length).toLowerCase())
+        }
+      }
+      return o
+    })
+
+  })
+}
+
+function cjs_server() {
+  const p=program
+    .command('server')
+    .description('Start a local server')
+
+  ini2input(p, ['server', 'security'], (x, x2arr)=>{
+
+    for(let v of ['extensions', 'entryIndex', 'entryForbidden']) {
+      x[v]=x[v].split(',').map(a=>a.trim()).filter(a=>a)
+    }
     const options={
       dir: x.directory,
       listen: x.port,
-      exts: parse_multi_value(x.extensions),
-      index: parse_multi_value(x.entryIndex),
-      error: x.entryError_absolute_path && path.resolve(x.directory, x.entryError_absolute_path),
-      forbidden: parse_multi_value(x.entryForbidden),
-      walk: x.entryEnable_walker,
-      debugging: x.debug_mode,
+      exts: x.extensions,
+      index: x.entryIndex,
+      error: x.entryFallbackFilename && path.resolve(x.directory, x.entryFallbackFilename),
+      forbidden: x.entryForbidden,
+      walk: x.entryFallbackTraverse,
+      debugging: x.debug,
 
       common: {
         locally: x.locally,
-        silent: x.silent_mode,
-        security: {
-          disableEval: x.securityDisable_eval,
-          disableProcess: x.securityDisable_process,
-          disableRequire: x.securityDisable_require,
-          disableUtils: x.securityDisable_utils,
-        },
+        silent: x.silent,
+        passTimeout: x.cachePassTimeout*1e3,
+        plugins: x2arr('pluginEnable'),
+        security: x2arr('security'),
       },
     }
 
@@ -116,31 +165,34 @@ function cjs_server() {
       }
     }
 
+    const {server}=require('./exports/simple-template-server')
     server(options)
 
   })
+
 }
 
 function cjs_cli() {
   const p=program
     .command('cli')
     .description('Execute a cjs file in command window')
-    .requiredOption('-f --file <string>', 'The entry file')
-    .option('-u --request-uri <string>', 'Specifiy a request uri for the entry file', '/')
-    .option('-h --host <string>', 'Specifiy the server host for the entry file', 'localhost')
-    .option('-s --schema <string>', 'Specifiy the schema for the entry file', 'http:')
-  p.action(x=>{
+
+  ini2input(p, ['cli', 'security'], (x, x2arr)=>{
+
+    const options={
+      entry: path.resolve(x.cliFile),
+      uri: x.cliUri,
+      host: x.cliHost,
+      schema: x.cliSchema,
+      plugins: x2arr('pluginEnable'),
+      security: x2arr('security'),
+    }
 
     const {runAsCLI}=require('./exports/simple-template-server')
-    const path=require('path')
-    runAsCLI({
-      entry: path.resolve(x.file),
-      uri: x.requestUri,
-      host: x.host,
-      schema: x.schema,
-    })
+    runAsCLI(options)
 
   })
+
 }
 
 cjs_macro()
