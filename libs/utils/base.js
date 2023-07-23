@@ -25,6 +25,9 @@ const PACKAGE_DIR=path.resolve(__dirname+'/../..')+path.sep
 function isPackageFile(_access_file) {
   return _access_file.indexOf(PACKAGE_DIR)===0
 }
+function isPackageTestFile(_access_file) {
+  return _access_file.indexOf(PACKAGE_DIR+'test')===0
+}
 
 function loadOrSetCache(caches, {filename, mockFileContent, wrapper, passTimeout}, buildOpcodeFunc) {
   if(!buildOpcodeFunc) buildOpcodeFunc=x=>x
@@ -232,6 +235,7 @@ module.exports={
   getUniqueCode,
   loadBalance,
   isPackageFile,
+  isPackageTestFile,
   sleep,
   INIParser,
   parseINIValue,

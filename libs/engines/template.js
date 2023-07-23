@@ -149,7 +149,7 @@ function getControllableGlobal() {
  The `getRequireCallable` function provides a secure method for using custom modules, and limits the use of core modules.
  */
 function getRequireCallable(filename) {
-  function _require_callable(x) {
+  const _require_callable=x=>{
     // `null` means the target is a core module provided by the nodejs runtime
     if(require.resolve.paths(x)===null) {
       return require(x)
@@ -163,9 +163,11 @@ function getRequireCallable(filename) {
     })
     return require(custom_module_path)
   }
+  _require_callable.main={filename}
   _require_callable.cache=require.cache
   return _require_callable
 }
+
 
 
 /**
@@ -311,7 +313,7 @@ function getNewContext(option, filename, globals) {
     defer,
     sleep,
     utils,
-    require: getRequireCallable(filename),
+    require: option.refers.getRequireCallable(filename),
   }
   Object.assign(ctx, globals, __SINGLETON__.interfaces)
   Object.assign(ctx, controllableGlobal)
@@ -389,7 +391,7 @@ function _prehandleFile(syncMode, option, {filename, mockFileContent, wrapper, p
     }
   })
   if(beforeExecuteSync) {
-    beforeExecuteSync(pctx, __SINGLETON__)
+    beforeExecuteSync(pctx, __SINGLETON__, option)
   }
 
   return {
@@ -433,6 +435,9 @@ function getParser(customOption={}) {
   const cache={}
   const controllableGlobal=getControllableGlobal()
   const Tokens=option.tokens
+  const refers={
+    getRequireCallable,
+  }
 
   // 此处需要解决：
   // 1. 插件只vm编译一次
@@ -448,6 +453,7 @@ function getParser(customOption={}) {
       controllableGlobal,
       __SINGLETON__: null,
       PASS_TIMEOUT: file.passTimeout || -1,
+      refers,
     }
     return prehandleFileAsync(option, file, globals, emitters)
   }

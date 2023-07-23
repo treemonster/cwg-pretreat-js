@@ -94,6 +94,7 @@ function ini2input(p, activeSections, handle) {
   })
 
   p.action(x=>{
+
     for(let v in x) {
       x[v]=parseINIValue(x[v], ctx).value
     }
@@ -117,11 +118,17 @@ function ini2input(p, activeSections, handle) {
       })
     }
 
-    handle(x, p=>{
-      const o=[]
+    handle(x, (p, option)=>{
+      const {asObject, ignoreCase}=option
+      const o=asObject? {}: []
       for(let k in x) {
-        if(k.indexOf(p)>-1 && x[k]===true) {
-          o.push(k.substr(p.length).toLowerCase())
+        if(k.indexOf(p)===-1 || x[k]===false) continue
+        let k1=k.substr(p.length)
+        if(ignoreCase) k1=k1.toLowerCase()
+        if(asObject) {
+          o[k1]=x[k]
+        }else{
+          o.push(k1)
         }
       }
       return o
@@ -154,8 +161,8 @@ function cjs_server() {
         locally: x.locally,
         silent: x.silent,
         passTimeout: x.cachePassTimeout*1e3,
-        plugins: x2arr('pluginEnable'),
-        security: x2arr('security'),
+        plugins: x2arr('pluginEnable', {ignoreCase: 1}),
+        security: x2arr('security', {asObject: 1}),
       },
     }
 
@@ -184,8 +191,8 @@ function cjs_cli() {
       uri: x.cliUri,
       host: x.cliHost,
       schema: x.cliSchema,
-      plugins: x2arr('pluginEnable'),
-      security: x2arr('security'),
+      plugins: x2arr('pluginEnable', {ignoreCase: 1}),
+      security: x2arr('security', {asObject: 1}),
     }
 
     const {runAsCLI}=require('./exports/simple-template-server')

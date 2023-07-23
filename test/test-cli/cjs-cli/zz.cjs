@@ -2,6 +2,13 @@
 
 console.log(process.pid)
 
+const path=require('path')
+console.log(require+'')
+delete require.cache[path.resolve(__dirname+'/z1.js')]
+console.log(require('./z1'))
+
+return;
+
 function test(v, vv) {
 	console.log('-- test: '+vv+' --')
   console.log(v.constructor('return this')().eval+'')

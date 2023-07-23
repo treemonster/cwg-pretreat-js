@@ -30,8 +30,8 @@ const plugins=fs.readdirSync(PLUGINS_PATH).reduce((x, v)=>{
   return x
 }, {})
 
-const securityPlugin=plugins.security
-delete plugins.security // The securityPlugin must be the last plugin to be loaded
+const securityPlugin=plugins.core_security
+delete plugins.core_security // The securityPlugin must be the last plugin to be loaded
 
 
 const MIME={
@@ -309,40 +309,43 @@ async function CGI(CGI_options, COMMON_options, sharedGlobals, req, res) {
   }
 
   if(typeof _access_file==='string') {
-    const _ext=path.parse(_access_file).ext
+    _access_file={
+      filename: _access_file,
+    }
+  }
+
+  if(!_access_file.mockFileContent) {
+    const _ext=path.parse(_access_file.filename).ext
     if(!exts.includes(_ext)) {
       globals.endWithFile({
-        filename: _access_file,
+        filename: _access_file.filename,
       })
       return
     }
   }
 
-  prehandleFileAsync({
-    filename: _access_file,
-    passTimeout,
-  }, globals, {
-    beforeExecuteSync: (ctx, __SINGLETON__)=>{
+  _access_file.passTimeout=passTimeout
+  prehandleFileAsync(_access_file, globals, {
+    beforeExecuteSync: (ctx, __SINGLETON__, option)=>{
       // This is the entry of request handler.
       // The following code will only be called once a new request comes.
 
       const {interfaces, shared}=__SINGLETON__
 
       // The following code will auto load system plugins.
+
       const engineConfig={
         defaultINI: DEFAULT_INI_PATH,
+        customOption: option,
         securityPolicy,
       }
 
-      if(enablePlugins.includes('security')) {
-        ctx.include_library_sync('security', securityPlugin, {
-          engineConfig,
-          __SINGLETON__,
-        })
-      }
+      ctx.include_library_sync('core_security', securityPlugin, {
+        engineConfig,
+        __SINGLETON__,
+      })
 
       for(let key in plugins) {
-        if(key==='security') continue
 
         // The plugin whose filename start with `core_` means this is a core plugin.
         // All of the core plugins should be loaded without following the filter rules.

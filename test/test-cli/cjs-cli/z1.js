@@ -1,0 +1,5 @@
+console.log(111)
+console.log(eval+'')
+console.log(Function('return this')().eval+'')
+const ff=require('fs')
+console.log(ff.readdirSync+'')

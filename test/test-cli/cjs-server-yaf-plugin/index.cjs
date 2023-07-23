@@ -4,9 +4,6 @@ setDebugging(1)
 
 define('__APP_PATH__', __dirname)
 
-
-
-
 __autoload_classes(classname=>{
   // console.log("##>>", classname)
   function fn2camelcase(fn) {
