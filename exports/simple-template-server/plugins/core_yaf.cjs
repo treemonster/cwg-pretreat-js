@@ -14,8 +14,7 @@
     instead of using them at runtime.
  */
 
-const fs=require('fs')
-const path=require('path')
+const {fs, path}=engineConfig.Api
 
 // cache the results which are computationally intensive and hardly change in the memory
 Application.YAF_STORAGE=Application.YAF_STORAGE || {

@@ -1,6 +1,7 @@
-
-const fs=require('fs')
-const path=require('path')
+const {
+  fs,
+  path,
+}=require('./api')
 
 const T_COMMENT=';'
 const T_QUOTE1='"'

@@ -1,14 +1,20 @@
 #!/usr/bin/env node
 
-const {Command}=require('commander')
-const program=new Command()
+
 const path=require('path')
 const fs=require('fs')
 
-program
-  .name('cjs')
-  .description('A powerful preprocessing toolkit')
-  .version(require(__dirname+'/package.json').version)
+const {
+  configProgram,
+  configCommand,
+  ini2input,
+}=require(__dirname+'/libs/utils/base')
+
+const program=configProgram({
+  name: 'cjs',
+  description: 'A powerful preprocessing toolkit',
+  version: require(__dirname+'/package.json').version,
+})
 
 function cjs_macro() {
   program
@@ -54,99 +60,30 @@ function cjs_macro() {
 
 }
 
-
-
-function ini2input(p, activeSections, handle) {
-  p.option('-c --config <string>', 'Specifiy the configuration file')
-  const {INIParser, parseINIValue, filename2INIContext}=require(__dirname+'/libs/utils/base')
-  const default_ini=__dirname+'/exports/simple-template-server/default.ini'
-  const {comments, groups, ini, ctx}=INIParser({
-    filename: default_ini,
+function _ini2input(program, {activeSections, toArrayFields, filters}, handle) {
+  return ini2input(program, {
+    defaultINI: __dirname+'/exports/simple-template-server/default.ini',
     activeSections,
-    onValue: ({keychain, comment, rawValue})=>{
-      let options={
-        call: 'option',
-        short: '',
-      }
-
-      if(+rawValue+''===rawValue) {
-        options.xtype='<number>'
-        options.defaultValue=+rawValue
-      }else if(rawValue.match(/^(on|off|yes|no|true|false)$/i)){
-        options.xtype='<boolean>'
-        options.defaultValue=rawValue.match(/^(on|yes|true)$/i)? true: false
-      }else{
-        options.xtype='<string>'
-        options.defaultValue=rawValue
-      }
-
-      const _comment=comment.replace(/<(?:(required)|(?:short:\s*(.+?))|(noargv))>\s+/g, (_, required, short, noargv)=>{
-        if(required) options.call='requiredOption'
-        if(short) options.short=short+' '
-        if(noargv) options.xtype=''
-        return ''
-      })
-
-      const arg=[options.short+'--'+keychain.join('-')+(options.xtype? ' '+options.xtype: ''), _comment]
-      if(options.call==='option') arg.push(options.defaultValue)
-      p[options.call](...arg)
-    },
-  })
-
-  p.action(x=>{
-
-    for(let v in x) {
-      x[v]=parseINIValue(x[v], ctx).value
-    }
-    if(x.config) {
-      const fn=path.resolve(x.config)
-      INIParser({
-        filename: fn,
-        mockFileContent: fs.readFileSync(default_ini, 'utf8')+'\n\n'+fs.readFileSync(fn, 'utf8'),
-        activeSections,
-        onValue: ({keychain, value})=>{
-          const _key=keychain.reduce((x, y, i)=>{
-            if(i) {
-              x+=y.charAt(0).toUpperCase()+y.substr(1)
-            }else{
-              x+=y
-            }
-            return x
-          }, '')
-          if(p.getOptionValueSource(_key)==='default') x[_key]=value
-        }
-      })
-    }
-
-    handle(x, (p, option)=>{
-      const {asObject, ignoreCase}=option
-      const o=asObject? {}: []
-      for(let k in x) {
-        if(k.indexOf(p)===-1 || x[k]===false) continue
-        let k1=k.substr(p.length)
-        if(ignoreCase) k1=k1.toLowerCase()
-        if(asObject) {
-          o[k1]=x[k]
-        }else{
-          o.push(k1)
-        }
-      }
-      return o
-    })
-
-  })
+    toArrayFields,
+    filters,
+  }, handle)
 }
 
 function cjs_server() {
-  const p=program
-    .command('server')
-    .description('Start a local server')
+  const p=configCommand(program, {
+    command: 'server',
+    description: 'Start a local server',
+  })
 
-  ini2input(p, ['server', 'security'], (x, x2arr)=>{
+  _ini2input(p, {
+    activeSections: ['server', 'security'],
+    toArrayFields: ['extensions', 'entryIndex', 'entryForbidden'],
+    filters: {
+      pluginEnable: {ignoreCase: 1},
+      security: {asObject: 1},
+    },
+  }, x=>{
 
-    for(let v of ['extensions', 'entryIndex', 'entryForbidden']) {
-      x[v]=x[v].split(',').map(a=>a.trim()).filter(a=>a)
-    }
     const options={
       dir: x.directory,
       listen: x.port,
@@ -161,8 +98,8 @@ function cjs_server() {
         locally: x.locally,
         silent: x.silent,
         passTimeout: x.cachePassTimeout*1e3,
-        plugins: x2arr('pluginEnable', {ignoreCase: 1}),
-        security: x2arr('security', {asObject: 1}),
+        plugins: x.pluginEnable,
+        security: x.security,
       },
     }
 
@@ -180,19 +117,27 @@ function cjs_server() {
 }
 
 function cjs_cli() {
-  const p=program
-    .command('cli')
-    .description('Execute a cjs file in command window')
 
-  ini2input(p, ['cli', 'security'], (x, x2arr)=>{
+  const p=configCommand(program, {
+    command: 'cli',
+    description: 'Execute a cjs file in command window',
+  })
+
+  _ini2input(p, {
+    activeSections: ['cli', 'security'],
+    filters: {
+      pluginEnable: {ignoreCase: 1},
+      security: {asObject: 1},
+    },
+  }, x=>{
 
     const options={
       entry: path.resolve(x.cliFile),
       uri: x.cliUri,
       host: x.cliHost,
       schema: x.cliSchema,
-      plugins: x2arr('pluginEnable', {ignoreCase: 1}),
-      security: x2arr('security', {asObject: 1}),
+      plugins: x.pluginEnable,
+      security: x.security,
     }
 
     const {runAsCLI}=require('./exports/simple-template-server')

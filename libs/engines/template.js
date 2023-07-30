@@ -1,7 +1,10 @@
 'use strict'
 
-const path=require('path')
-const vm=require('vm')
+const {
+  path,
+  vm,
+}=require('../utils/api')
+
 const utils=require('../utils/base')
 const {defer, sleep, loadOrSetCache, getTimeRecorder, merge}=utils
 
@@ -86,9 +89,6 @@ function transformToAst(tokens, filename, isSyncMode) {
   return new vm.Script(code, filename)
 }
 
-const __UNSAFE__={
-  eval: x=>eval(x),
-}
 
 /**
  This object should be a singleton in every instance.
@@ -108,8 +108,6 @@ function getControllableGlobal() {
     console,
     Buffer,
     process,
-
-    eval: __UNSAFE__.eval,
 
     TextDecoder,
     TextEncoder,
@@ -145,9 +143,6 @@ function getControllableGlobal() {
 }
 
 
-/**
- The `getRequireCallable` function provides a secure method for using custom modules, and limits the use of core modules.
- */
 function getRequireCallable(filename) {
   const _require_callable=x=>{
     // `null` means the target is a core module provided by the nodejs runtime
@@ -169,6 +164,13 @@ function getRequireCallable(filename) {
 }
 
 
+function getEvalCallable(ctx) {
+  return code=>{
+    const e=new vm.Script(code)
+    return e.runInNewContext(ctx)
+  }
+}
+
 
 /**
  The __SINGLETON__ is a special type of variable.
@@ -186,7 +188,6 @@ function getNewContext(option, filename, globals) {
       // properties written in `interfaces` are shared during the request threading
       interfaces: {
 
-        eval: x=>controllableGlobal.eval(x),
         time_recorder: getTimeRecorder(),
         echo: (...argv)=>{
           __SINGLETON__.shared.output.push(...argv)
@@ -313,8 +314,11 @@ function getNewContext(option, filename, globals) {
     defer,
     sleep,
     utils,
-    require: option.refers.getRequireCallable(filename),
   }
+  Object.assign(ctx, {
+    require: option.refers.getRequireCallable(filename),
+    eval: option.refers.getEvalCallable(ctx),
+  })
   Object.assign(ctx, globals, __SINGLETON__.interfaces)
   Object.assign(ctx, controllableGlobal)
   ctx.globalThis=ctx
@@ -437,11 +441,9 @@ function getParser(customOption={}) {
   const Tokens=option.tokens
   const refers={
     getRequireCallable,
+    getEvalCallable,
   }
 
-  // 此处需要解决：
-  // 1. 插件只vm编译一次
-  // 2. 运行多次
 
   return (file, globals, emitters)=>{
     if(typeof file==='string') {

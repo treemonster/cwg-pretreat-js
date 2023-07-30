@@ -1,5 +1,13 @@
-const fs=require('fs')
-const path=require('path')
+
+const {
+  fs,
+  path,
+  crypto,
+  net,
+  cluster,
+  os,
+}=require('./api')
+
 
 function getTextFile(fn) {
   const p=fs.statSync(fn)
@@ -18,7 +26,7 @@ function existsFile(fn) {
 }
 
 function md5(str) {
-  return require('crypto').createHash('md5').update(str).digest('hex')
+  return crypto.createHash('md5').update(str).digest('hex')
 }
 
 const PACKAGE_DIR=path.resolve(__dirname+'/../..')+path.sep
@@ -95,7 +103,7 @@ function getTimeRecorder() {
 function getLocalIpv4Addresses() {
   let rr={'127.0.0.1':1}
   try{
-    const ii=require('os').networkInterfaces()
+    const ii=os.networkInterfaces()
     for(let a in ii) {
       ii[a].map(x=>{
         if(!x.family.match(/IPV4/i)) return;
@@ -107,12 +115,11 @@ function getLocalIpv4Addresses() {
 }
 
 async function getAvailablePort() {
-  if(require('cluster').isWorker) {
+  if(cluster.isWorker) {
     console.log('`getAvailablePort` can only be called in Master process')
     return 0
   }
   const [min, max]=[20001, 50000]
-  const net=require('net')
   async function _available(port) {
     let success=false
     try{
@@ -151,7 +158,6 @@ function getUniqueCode() {
 
 
 async function loadBalance(workersCount, workerHandler, masterHandler, silentMode=false) {
-  const cluster=require('cluster')
   const log=silentMode? (_=>0): (...x)=>console.log(...x)
   if (cluster.isWorker) {
     log(`worker ${process.pid} started`)
@@ -223,6 +229,12 @@ const {
   filename2INIContext,
 }=require('./iniParser')
 
+const {
+  configProgram,
+  configCommand,
+  ini2input,
+}=require('./cmdHelper')
+
 module.exports={
   readrs,
   existsFile,
@@ -237,8 +249,14 @@ module.exports={
   isPackageFile,
   isPackageTestFile,
   sleep,
+
   INIParser,
   parseINIValue,
   filename2INIContext,
+
+  configProgram,
+  configCommand,
+  ini2input,
+
   merge,
 }

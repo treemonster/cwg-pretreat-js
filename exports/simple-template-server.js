@@ -13,10 +13,15 @@ const {
 }=utils
 
 const necessaryVariables={process, require, utils}
-
-const fs=require('fs')
-const path=require('path')
-const cluster=require('cluster')
+const Api=require('../libs/utils/api')
+const {
+  fs,
+  path,
+  cluster,
+  url,
+  querystring,
+  http,
+}=Api
 
 const DEFAULT_INI_PATH=__dirname+'/simple-template-server/default.ini'
 
@@ -94,7 +99,7 @@ function start_server({
     locally=false,
     silent=false,
   }=COMMON_options
-  const msrv=require('http').createServer((req, res)=>{
+  const msrv=http.createServer((req, res)=>{
     CGI(CGI_options, COMMON_options, sharedGlobals, req, res)
   })
   msrv.listen(listen, locally? '127.0.0.1': '0.0.0.0')
@@ -126,15 +131,15 @@ async function CGI(CGI_options, COMMON_options, sharedGlobals, req, res) {
   }=COMMON_options
   const {basedir}=sharedGlobals
 
-  const {url, headers, method}=req
-  const req_fullurl=url.match(/^https?\:\/\//)? url: 'http://'+headers.host+url
+  const {url: _url, headers, method}=req
+  const req_fullurl=_url.match(/^https?\:\/\//)? _url: 'http://'+headers.host+_url
   const {
     pathname,
     query,
     search: req_search,
-  }=require('url').parse(req_fullurl)
+  }=url.parse(req_fullurl)
   const req_pathname=path.normalize(unescape(pathname)).replace(/[\\\/]+/g, '/')
-  const req_query=require('querystring').parse(query)
+  const req_query=querystring.parse(query)
   const req_body_reader_defer=defer()
   const req_body_defer=defer()
   req_body_reader_defer.promise.then(asUTF8String=>{
@@ -338,6 +343,7 @@ async function CGI(CGI_options, COMMON_options, sharedGlobals, req, res) {
         defaultINI: DEFAULT_INI_PATH,
         customOption: option,
         securityPolicy,
+        Api, // The Api object should only provides to the internal plugins.
       }
 
       ctx.include_library_sync('core_security', securityPlugin, {

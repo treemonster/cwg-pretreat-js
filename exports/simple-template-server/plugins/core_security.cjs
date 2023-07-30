@@ -2,10 +2,10 @@
 
 
 /**
- The Template Engine provided an unlimited sandbox to execute
- custom code for convenience. For some special situations, such
- as a production server, are still need preventing some dangerous
- behaviors.
+ The Template Engine provided an simple sandbox to execute
+ custom code for convenience. For some special situations,
+ such as a production server, are still need preventing some
+ dangerous behaviors.
  This plugin is used for executing the security policy.
  */
 
@@ -39,7 +39,7 @@ function traverseAttr(source, attr) {
     x=x.trim()
     if(!x) continue
 
-    if(x==='*') return source
+    if(x==='*') return Object.freeze(source)
 
     for(let i=0, s=source, t=target, v=x.split('.'); i<v.length; i++) {
       const b=v[i].trim()
@@ -53,10 +53,11 @@ function traverseAttr(source, attr) {
       }
     }
   }
-  return target
+  return Object.freeze(target)
 }
 
-
+const nodeGlobal=parseInt.constructor('return global')()
+const nodeGlobalThis=parseInt.constructor('return this')()
 const realGlobal=Function('return global')()
 const realGlobalThis=Function('return this')()
 const controllableGlobal=global
@@ -73,13 +74,15 @@ function mapToAll(attr, value) {
   _setval(currentContext)
   _setval(realGlobal)
   _setval(realGlobalThis)
+  _setval(nodeGlobal)
+  _setval(nodeGlobalThis)
 }
 
 
 
 const resolvers={}
 resolvers.EvalDisable=_=>{
-  mapToAll('eval', getPrevent('eval', {isFunc: true}))
+  mapToAll('eval', _=>getPrevent('eval', {isFunc: true}))
 }
 resolvers.PolluteFunctionPrototype=_=>{
   const vm=require('vm')
@@ -92,7 +95,11 @@ resolvers.PolluteFunctionPrototype=_=>{
     global: controllableGlobal,
   }
   v.runInNewContext(ctx)
-  mapToAll('Function', ctx.func.constructor.prototype.constructor)
+  mapToAll('Function', _=>ctx.func.constructor.prototype.constructor)
+  for(let k in nodeGlobal) delete nodeGlobal[k]
+  for(let k in nodeGlobalThis) delete nodeGlobalThis[k]
+  Object.assign(nodeGlobal, controllableGlobal, {global: controllableGlobal})
+  Object.assign(nodeGlobalThis, controllableGlobal, {global: controllableGlobal})
   delete ctx.func
 }
 resolvers.ProcessEnableAttributes=attr=>{
@@ -111,15 +118,19 @@ resolvers.RequireEnableModules=modules=>{
     _allow_list.push(m)
   }
 
+  const _is_whitelist=x=>{
+    x+=''
+    if(_allow_list.includes(x)) {
+      return x
+    }
+  }
+
   const Module=require('module')
   const originalRequire=Module.prototype.require
   Module.prototype.require=function(x) {
-    x+='' // Prevent overwrite `toString()` attacks
-    const {isPackageFile, isPackageTestFile}=utils
     const {filename}=this
-    if((isPackageFile(filename) && !isPackageTestFile(filename)) || _allow_list.includes(x)) {
-      return originalRequire.call(this, x)
-    }
+    const x1=_is_whitelist(x)
+    if(x1) return originalRequire.call(this, x1)
     throw new Error('Failed to require the `'+x+'` module due to the security policy.')
   }
 
@@ -127,8 +138,8 @@ resolvers.RequireEnableModules=modules=>{
   const _dgrc=filename=>{
     const _require=_grc(filename)
     const require=x=>{
-      x+='' // Prevent overwrite `toString()` attacks
-      if(_allow_list.includes(x)) return _require(x)
+      const x1=_is_whitelist(x)
+      if(x1) return _require(x1)
       throw new Error('Failed to require the `'+x+'` module due to the security policy.')
     }
     for(let x in _require) require[x]=_require[x]

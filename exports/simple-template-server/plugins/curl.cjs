@@ -62,7 +62,7 @@ function curl(x) {
     postbody,
   }=_format(x)
   const [retDefer, state]=_init({timeout})
-  const http=require(url.match(/^https/)? 'https': 'http')
+  const http=engineConfig.Api[url.match(/^https/)? 'https': 'http']
   const req=http.request(url, {
     method,
     headers,

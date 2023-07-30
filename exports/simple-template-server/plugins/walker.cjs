@@ -1,10 +1,8 @@
 <?js
 
-const os=require('os')
-const IS_WIN32_OS=os.platform()==='win32'
+const {os, fs, path, crypto}=engineConfig.Api
 
-const fs=require('fs')
-const path=require('path')
+const IS_WIN32_OS=os.platform()==='win32'
 
 function hsize(size) {
   const units=['b', 'kb', 'mb', 'gb']
@@ -19,7 +17,7 @@ function ltime(timestamp) {
 	return v.toLocaleString()
 }
 function hexcolor(x) {
-	return require('crypto').createHash('md5').update(x).digest('hex').substr(0, 6)
+	return crypto.createHash('md5').update(x).digest('hex').substr(0, 6)
 }
 function format_path(x) {
   return path.normalize('/'+x).replace(/[\\\/]+/g, '/').replace(/\/+$/, '') || '/'
