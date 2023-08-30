@@ -38,10 +38,14 @@ class Yaf_Application{
       const appconf=loadOrSetCache(
         Application.YAF_STORAGE.caches,
         {filename: config, passTimeout: PASS_TIMEOUT, wrapper: (x, str)=>{
-          return loadOrSetCache(
+          let _ini=loadOrSetCache(
             Application.YAF_STORAGE.caches,
             {filename: engineConfig.defaultINI, passTimeout: PASS_TIMEOUT},
-          )+'\n\n'+str
+          )
+          if(environ) {
+            _ini+=`\n\n[yaf]\napplication.environ=`+environ
+          }
+          return _ini+'\n\n'+str
         }},
         inidata=>{
           const _routes=new Set

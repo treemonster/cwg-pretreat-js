@@ -35,8 +35,10 @@ const plugins=fs.readdirSync(PLUGINS_PATH).reduce((x, v)=>{
   return x
 }, {})
 
+const loggerPlugin=plugins.core_logger
+delete plugins.core_logger
 const securityPlugin=plugins.core_security
-delete plugins.core_security // The securityPlugin must be the last plugin to be loaded
+delete plugins.core_security
 
 
 const MIME={
@@ -100,7 +102,7 @@ function start_server({
     silent=false,
   }=COMMON_options
   const msrv=http.createServer((req, res)=>{
-    CGI(CGI_options, COMMON_options, sharedGlobals, req, res)
+    CGI(CGI_options, COMMON_options, sharedGlobals, req, res, msrv)
   })
   msrv.listen(listen, locally? '127.0.0.1': '0.0.0.0')
 }
@@ -114,11 +116,12 @@ function start_server({
  * 4. throw errors if failed to obtain an available filename (if you have set a fallback filename in `error` param, then that file will handle the error instead)
  * 5. execute the file if it is executable or just send its content if it is static
  */
-async function CGI(CGI_options, COMMON_options, sharedGlobals, req, res) {
+async function CGI(CGI_options, COMMON_options, sharedGlobals, req, res, srv) {
   let {
     exts=['.html', '.cjs'],
     index=['index.cjs', 'index.html'],
     error='error.cjs',
+    disableCjs=false,
     forbidden=['node_modules'],
     walk=true,
     debugging=false,
@@ -126,6 +129,7 @@ async function CGI(CGI_options, COMMON_options, sharedGlobals, req, res) {
   const {
   	silent=false,
     security: securityPolicy=[],
+    logger: loggerConfig={},
     plugins: enablePlugins=Object.keys(plugins),
     passTimeout=1e3,
   }=COMMON_options
@@ -171,6 +175,7 @@ async function CGI(CGI_options, COMMON_options, sharedGlobals, req, res) {
     COMMON_options,
     request: req,
     response: res,
+    server: srv, // Note: srv is null if in CLI mode.
     url: req_fullurl,
     pathname: req_pathname,
     rawQuery: query,
@@ -235,7 +240,7 @@ async function CGI(CGI_options, COMMON_options, sharedGlobals, req, res) {
       }
     },
     header: (key, value)=>{
-      response.headers[key]=value
+      response.headers[key.toLowerCase()]=value
     },
     setStatusCode: status=>{
       response.statusCode=status
@@ -267,6 +272,7 @@ async function CGI(CGI_options, COMMON_options, sharedGlobals, req, res) {
 
   let _access_file=path.resolve(basedir+'/'+req_pathname)
   try{
+    if(disableCjs) throw new Error('The active file cannot be executed.')
     const _is_forbidden=!isPackageFile(_access_file) && forbidden.find(a=>_access_file.indexOf(a)>-1)
     if(_is_forbidden) {
       throw new Error('current route is forbidden')
@@ -283,7 +289,7 @@ async function CGI(CGI_options, COMMON_options, sharedGlobals, req, res) {
       }
       if(!index || !existsFile(_access_file)) {
         if(!walk) {
-          throw new Error('the administrator disallowed walking directory')
+          throw new Error('directory traversal is not allowed')
         }else{
           _access_file={
             filename: '@walker.cjs',
@@ -343,8 +349,14 @@ async function CGI(CGI_options, COMMON_options, sharedGlobals, req, res) {
         defaultINI: DEFAULT_INI_PATH,
         customOption: option,
         securityPolicy,
+        loggerConfig,
         Api, // The Api object should only provides to the internal plugins.
       }
+
+      ctx.include_library_sync('core_logger', loggerPlugin, {
+        engineConfig,
+        __SINGLETON__,
+      })
 
       ctx.include_library_sync('core_security', securityPlugin, {
         engineConfig,
@@ -477,6 +489,7 @@ exports.runAsCLI=({
   schema='http:',
   plugins=[],
   security=[],
+  ...extraCGIParams
 })=>{
   const {dir, base}=path.parse(entry)
   const CGI_options={
@@ -484,6 +497,7 @@ exports.runAsCLI=({
     index: [base],
     error: entry,
     walk: false,
+    ...extraCGIParams
   }
   const COMMON_options={
     silent: false,
@@ -504,14 +518,15 @@ exports.runAsCLI=({
   }
   const res=Object.assign(process.stdout, {
     writeHead: (statusCode, headers)=>{
-      console.log('-- statusCode:', statusCode, '--')
-      console.log('-- response headers --')
-      console.log(headers)
+      console.log('> statusCode='+statusCode)
+      for(let h in headers) {
+        console.log('> '+h+': '+headers[h])
+      }
     },
     end: content=>{
-      console.log('-- response content --')
+      console.log()
       console.log(content)
     }
   })
-  CGI(CGI_options, COMMON_options, sharedGlobals, req, res)
+  CGI(CGI_options, COMMON_options, sharedGlobals, req, res, null)
 }

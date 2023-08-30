@@ -18,6 +18,10 @@ npm i cwg-pretreat-js -g
 After installing the module globally, you will get a command line named `cjs`. Run `cjs` in the terminal to see more help.
 
 
+# Full documentation
+
+see https://github.com/treemonster/cwg-pretreat-js/docs
+
 # Issues
 
 https://github.com/treemonster/cwg-pretreat-js/issues

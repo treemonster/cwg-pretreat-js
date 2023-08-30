@@ -76,11 +76,12 @@ function cjs_server() {
   })
 
   _ini2input(p, {
-    activeSections: ['server', 'security'],
+    activeSections: ['server', 'security', 'logger'],
     toArrayFields: ['extensions', 'entryIndex', 'entryForbidden'],
     filters: {
       pluginEnable: {ignoreCase: 1},
       security: {asObject: 1},
+      logger: {asObject: 1},
     },
   }, x=>{
 
@@ -100,6 +101,7 @@ function cjs_server() {
         passTimeout: x.cachePassTimeout*1e3,
         plugins: x.pluginEnable,
         security: x.security,
+        logger: x.logger,
       },
     }
 

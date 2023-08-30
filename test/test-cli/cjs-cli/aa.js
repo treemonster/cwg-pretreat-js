@@ -1,3 +1,6 @@
 // console.log(">>", utils)
-console.log('>>>>', process)
-console.log(">>>", module, __filename)
+// console.log('>>>>', process)
+// console.log(">>>", module, __filename)
+// console.log(require('fs'))
+// console.log(eval("require('fs')"))
+console.log(9)

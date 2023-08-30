@@ -35,7 +35,7 @@ const T_FILE=_t++
 const T_DIRECTORY=_t++
 function get_list(dir) {
   const real_dir=IS_WIN32_OS? dir.substr(1): dir
-  const ls=fs.readdirSync(real_dir)
+  const ls=fs.readdirSync(real_dir+'/')
   return ls.filter(a=>!['.', '..'].includes(a)).map(fn=>{
     const absfile=path.resolve(real_dir+'/'+fn)
     try{

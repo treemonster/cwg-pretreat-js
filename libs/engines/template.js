@@ -3,6 +3,7 @@
 const {
   path,
   vm,
+  module: _module,
 }=require('../utils/api')
 
 const utils=require('../utils/base')
@@ -143,35 +144,6 @@ function getControllableGlobal() {
 }
 
 
-function getRequireCallable(filename) {
-  const _require_callable=x=>{
-    // `null` means the target is a core module provided by the nodejs runtime
-    if(require.resolve.paths(x)===null) {
-      return require(x)
-    }
-    const __cjs_dirname=path.resolve(filename+'/..')
-    const custom_module_path=require.resolve(x, {
-      paths: [
-        __cjs_dirname,
-        __cjs_dirname+'/node_modules',
-      ],
-    })
-    return require(custom_module_path)
-  }
-  _require_callable.main={filename}
-  _require_callable.cache=require.cache
-  return _require_callable
-}
-
-
-function getEvalCallable(ctx) {
-  return code=>{
-    const e=new vm.Script(code)
-    return e.runInNewContext(ctx)
-  }
-}
-
-
 /**
  The __SINGLETON__ is a special type of variable.
  It provides some functions that can be shared across different contexts
@@ -189,16 +161,115 @@ function getNewContext(option, filename, globals) {
       interfaces: {
 
         time_recorder: getTimeRecorder(),
+
+        /**
+         * @docs/functions
+         * @desc
+         * Appends multiple values to the output.
+         * @params
+         * `...any`: An array containing anything that can be serialized. Such as strings, numbers, Promises, etc.
+         * @examples
+         * echo(1, 'xx', Promise.resolve('yyy'))
+         * */
         echo: (...argv)=>{
           __SINGLETON__.shared.output.push(...argv)
         },
 
+        /**
+         * @docs/functions
+         * @desc
+         * Specifies the autoload rules of undefined classes.
+         * @params
+         * `func`: A callback function which returns the filepath of the current classname.
+         * @returns
+         * File path string.
+         * @examples
+         * 
+         * // X1.cjs
+         * 
+         * <?js
+         * class X1{
+         *   static log() {
+         *     return 'X1 log'
+         *   }
+         * }
+         * 
+         * 
+         * 
+         * // index.cjs
+         * 
+         * <?js
+         * 
+         * __autoload_classes(classname=>{
+         *   if(classname==='X1') return __dirname+'/X1.cjs'
+         *   // you can write more mapping rules here
+         * })
+         * 
+         * // Although the `X1` class is undefined in this context, it will be autoloaded here
+         * // because we have specified the filename of this class in the `__autoload_classes` function.
+         * // So we do not need to write some redundant codes to include the class file explicitly.
+         * echo(X1.log())
+         * 
+         * 
+         * // run index.cjs
+         * 
+         * cjs cli -f index.cjs
+         * 
+         * */
         __autoload_classes: func=>{
           __SINGLETON__.shared.modules.__autoload_classes_callback=func
         },
+
+
+        /**
+         * @docs/functions
+         * @desc
+         * Specifies the autoload rules of undefined libraries.
+         * @params
+         * `func`: A callback function which returns the filepath of the current library.
+         * @returns
+         * File path string.
+         * @examples
+         * 
+         * // Y1.cjs
+         * 
+         * <?js
+         * function log() {
+         *   return 'Y1 log'
+         * }
+         * exports({
+         *   library_functions: {
+         *     log,
+         *   }
+         * })
+         * 
+         * 
+         * 
+         * // index.cjs
+         * 
+         * <?js
+         * 
+         * __autoload_libraries(libname=>{
+         *   if(libname==='Y1') return __dirname+'/Y1.cjs'
+         *   // you can write more mapping rules here
+         * })
+         * 
+         * // Although the `Y1` class is undefined in this context, it will be autoloaded here
+         * // because we have specified the filename of this library in the `__autoload_libraries` function.
+         * // So we do not need to write some redundant codes to include the library file explicitly.
+         * echo(Y1.log())
+         * 
+         * 
+         * // run index.cjs
+         * 
+         * cjs cli -f index.cjs
+         * 
+         * */
         __autoload_libraries: func=>{
           __SINGLETON__.shared.modules.__autoload_libraries_callback=func
         },
+
+
         get_autoload_callbacks: _=>{
           return {
             __autoload_classes: __SINGLETON__.shared.modules.__autoload_classes_callback,
@@ -225,12 +296,35 @@ function getNewContext(option, filename, globals) {
             return content+'\n\nexports({library_class: '+path.parse(class_filename).name+'})'
           },
         },
-
       },
 
     }
   }
   const {__SINGLETON__}=option
+
+  /**
+   * @docs/functions
+   * @desc
+   * Exports variables.
+   * @params
+   * `obj`: A special object that is used to define the public interface of a module. Just like the `module.exports` object of Node.js.
+   * @examples
+   * 
+   * 
+   * // L1.cjs
+   * <?js
+   * exports({
+   *   xx: 1,
+   *   func: _=>{
+   *     return 22
+   *   }
+   * })
+   * 
+   * // index.cjs
+   * <?js
+   * const v=await include_file(__dirname+'/L1.cjs')
+   * console.log(v)
+   * */
   const exports=obj=>{
     for(let k in obj) {
       if(ctx[k]) {
@@ -240,6 +334,29 @@ function getNewContext(option, filename, globals) {
     }
   }
 
+  /**
+   * @docs/functions
+   * @desc
+   * Import a cjs module from a specified path. It is an asynchronous function which returns a Promise. Just like the `import` function of Node.js.
+   * @params
+   * `inc_filename`: The cjs module path.
+   * `private_datas`: Specifies extra global variables for the imported module.
+   * @examples
+   * 
+   * // L1.cjs
+   * <?js
+   * function test() {
+   *   return A1+A2 // Note: Both A1 and A2 are global variables which are provided by the caller.
+   * }
+   * exports({
+   *   test,
+   * })
+   * 
+   * // index.cjs
+   * <?js
+   * const v=await include_file(__dirname+'/L1.cjs', {A1: 11, A2: 22})
+   * echo(v.test())
+   * */
   const include_file=async (inc_filename, private_datas)=>{
     const _filename=path.resolve(filename+'/..', inc_filename)
     const {output, exports: _exports}=await prehandleFileAsync(
@@ -316,8 +433,36 @@ function getNewContext(option, filename, globals) {
     utils,
   }
   Object.assign(ctx, {
-    require: option.refers.getRequireCallable(filename),
-    eval: option.refers.getEvalCallable(ctx),
+    /**
+     * @docs/functions
+     * @define
+     * require(module)
+     * @desc
+     * A function which has similar behaviors of `require` function in Node.js.
+     * @params
+     * `module`: The wanted module path.
+     * */
+    require: (_=>{
+      try{
+        return _module.createRequire(filename)
+      }catch(e) {
+        return require
+      }
+    })(),
+
+    /**
+     * @docs/functions
+     * @desc
+     * Execute specified code in current context.
+     * @params
+     * `code`: The code string.
+     * @returns
+     * The last value.
+     * */
+    eval: code=>{
+      const e=new vm.Script(code)
+      return e.runInNewContext(ctx)
+    },
   })
   Object.assign(ctx, globals, __SINGLETON__.interfaces)
   Object.assign(ctx, controllableGlobal)
@@ -439,11 +584,6 @@ function getParser(customOption={}) {
   const cache={}
   const controllableGlobal=getControllableGlobal()
   const Tokens=option.tokens
-  const refers={
-    getRequireCallable,
-    getEvalCallable,
-  }
-
 
   return (file, globals, emitters)=>{
     if(typeof file==='string') {
@@ -455,7 +595,6 @@ function getParser(customOption={}) {
       controllableGlobal,
       __SINGLETON__: null,
       PASS_TIMEOUT: file.passTimeout || -1,
-      refers,
     }
     return prehandleFileAsync(option, file, globals, emitters)
   }

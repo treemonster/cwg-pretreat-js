@@ -70,6 +70,12 @@ function loadOrSetCache(caches, {filename, mockFileContent, wrapper, passTimeout
   return fileCache.opcode
 }
 
+
+/**
+ * @docs/functions
+ * @desc
+ * An implementation of Promise.defer
+ * */
 function defer() {
   let resolve, reject
   const promise=new Promise((_resolve, _reject)=>{
@@ -197,6 +203,19 @@ async function loadBalance(workersCount, workerHandler, masterHandler, silentMod
   }
 }
 
+
+
+/**
+ * @docs/functions
+ * @desc
+ * A simple function which returns a `Promise` object that will be resolved in the specified time.
+ * @examples
+ * 
+ * // index.cjs
+ * <?js
+ * await sleep(1e3) // delay 1 second
+ * echo('done')
+ * */
 function sleep(t) {
   let _h=0
   const p=new Promise(r=>{

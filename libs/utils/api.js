@@ -14,4 +14,5 @@ module.exports={
   https: require('https'),
   url: require('url'),
   querystring: require('querystring'),
+  module: require('module'),
 }

@@ -39,7 +39,8 @@ function traverseAttr(source, attr) {
     x=x.trim()
     if(!x) continue
 
-    if(x==='*') return Object.freeze(source)
+    // return the original object if all the attributes are allowed
+    if(x==='*') return source // Object.freeze(source)
 
     for(let i=0, s=source, t=target, v=x.split('.'); i<v.length; i++) {
       const b=v[i].trim()
@@ -115,42 +116,38 @@ resolvers.RequireEnableModules=modules=>{
   const _allow_list=[]
   for(let m of _modules) {
     if(m==='*') return;
-    _allow_list.push(m)
+    const _m=m.match(/(\*)|([^*]+)/g).map(a=>a==='*'?'.*?':a)
+    _allow_list.push(new RegExp('^'+_m.join('')+'$'))
   }
-
-  const _is_whitelist=x=>{
-    x+=''
-    if(_allow_list.includes(x)) {
-      return x
-    }
+  const path=require('path')
+  const {resolve: _resolve, cache: _cache}=require
+  function _wrap(r) {
+    Object.assign(r, {
+      resolve: _resolve,
+      cache: _cache,
+    })
+    return r
   }
-
   const Module=require('module')
   const originalRequire=Module.prototype.require
-  Module.prototype.require=function(x) {
+  const _require=function(x) {
     const {filename}=this
-    const x1=_is_whitelist(x)
-    if(x1) return originalRequire.call(this, x1)
+    x+=''
+    let _x=x
+    if(_resolve.paths(_x)!==null) {
+      _x=path.resolve(p, _x)
+    }
+    for(let re of _allow_list) {
+      if(_x.match(re)) return originalRequire.call(this, x)
+    }
     throw new Error('Failed to require the `'+x+'` module due to the security policy.')
   }
-
-  const _grc=engineConfig.customOption.refers.getRequireCallable
-  const _dgrc=filename=>{
-    const _require=_grc(filename)
-    const require=x=>{
-      const x1=_is_whitelist(x)
-      if(x1) return _require(x1)
-      throw new Error('Failed to require the `'+x+'` module due to the security policy.')
-    }
-    for(let x in _require) require[x]=_require[x]
-    return require
-  }
-  engineConfig.customOption.refers.getRequireCallable=_dgrc
+  Module.prototype.require=_wrap(_require)
   mapToAll('require', x=>{
     if(!x.require || !x.require.main) return
-    return _dgrc(x.require.main.filename)
+    const e=x.require.main.filename
+    return _wrap(v=>_require.call({filename: e}, v))
   })
-
 }
 
 
